@@ -1,0 +1,63 @@
+api:
+  binance_rest_url: https://api.binance.com
+  binance_ws_url: wss://stream.binance.com:9443/stream
+  clob_burst: 10
+  clob_rate_limit: 5
+  clob_url: https://clob.polymarket.com
+  gamma_burst: 20
+  gamma_rate_limit: 10
+  gamma_url: https://gamma-api.polymarket.com
+  max_retries: 5
+  retry_base_delay: 1.0
+  retry_max_delay: 60.0
+dry_run: false
+kill_switch:
+  max_consecutive_losses: 10
+  max_drawdown: -20.0
+logging:
+  backup_count: 5
+  file_level: DEBUG
+  level: INFO
+  log_file: data/logs/bot.log
+  max_bytes: 10485760
+paper_mode: false
+shield:
+  cancel_timeout_ms: 500
+  enabled: true
+  threshold: 0.001
+timing:
+  display_interval: 10
+  health_write_interval: 30
+  market_fetch_interval: 3
+  metrics_write_interval: 60
+  order_check_interval: 2
+  scan_interval: 30
+  shutdown_timeout: 10
+  stale_feed_timeout: 30
+trading:
+  spread_capture_enabled: false
+  allowed_assets:
+  - BTC
+  - ETH
+  - SOL
+  allowed_timeframes:
+  - 5m
+  cancel_time_remaining: 15
+  max_orders_per_window: 1
+  max_position: 30.0
+  max_single_exposure: 10.0
+  min_spread_profit: 0.04
+  order_size: 5.0
+
+# Arb engine config
+arb:
+  enabled: true
+  order_size: 5.0
+  max_exposure: 15.0
+  min_edge: 0.05
+  cooldown_seconds: 30
+  move_threshold_pct: 0.2
+  time_weight_early: 0.3
+  time_weight_late: 0.7
+  sell_discount_from_fair: 0.02
+  sell_timeout_seconds: 60

@@ -1,0 +1,7 @@
+py-clob-client
+python-dotenv
+websockets
+aiohttp
+pyyaml
+requests
+web3
