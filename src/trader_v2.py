@@ -492,55 +492,50 @@ class TraderV2:
                 asyncio.ensure_future(self.mm_engine.execute_shield(pair, cancel_side))
 
     async def _check_fills(self):
-        """Check order fill status. Uses Polymarket WS for speed, REST as fallback."""
+        """Check order fill status via REST only. WS bid comparison removed — unreliable."""
         for pair in self.mm_engine.get_active_pairs():
             if pair.status == PairStatus.BOTH_FILLED:
                 continue
 
             up_filled = pair.up_leg.is_filled
             down_filled = pair.down_leg.is_filled
+            up_fill_price = 0.0
+            down_fill_price = 0.0
 
             if self.config.paper_mode:
                 now = time.time()
                 if not up_filled and not pair.up_leg.is_cancelled and now - pair.created_at > 5:
                     up_filled = True
+                    up_fill_price = pair.up_leg.price
                 if not down_filled and not pair.down_leg.is_cancelled and now - pair.created_at > 5:
                     down_filled = True
+                    down_fill_price = pair.down_leg.price
             else:
-                # Check Up leg
+                # Up leg — REST only, no WS guessing
                 if not up_filled and not pair.up_leg.is_cancelled and pair.up_leg.clob_order_id:
-                    # Fast path: check if Polymarket WS shows our bid was lifted
-                    # (best bid dropped below our price = someone took our order)
-                    ws_bid = self.polymarket_feed.get_best_bid(pair.up_leg.token_id)
-                    ws_age = self.polymarket_feed.get_feed_age(pair.up_leg.token_id)
-                    if ws_age is not None and ws_age < 5 and ws_bid > 0:
-                        # If best bid is now below our price, our order may have filled
-                        if ws_bid < pair.up_leg.price - 0.005:
-                            # Confirm via REST
-                            status = self.clob_manager.get_order_status(pair.up_leg.clob_order_id)
-                            if float(status.get("size_matched", 0) or 0) > 0:
-                                up_filled = True
-                    else:
-                        # Fallback: REST poll
+                    try:
                         status = self.clob_manager.get_order_status(pair.up_leg.clob_order_id)
-                        if status.get("status") == "FILLED" or float(status.get("size_matched", 0) or 0) > 0:
+                        matched = float(status.get("size_matched", 0) or 0)
+                        if status.get("status") == "FILLED" or matched > 0:
                             up_filled = True
+                            # Use actual fill price if available, else fall back to order price
+                            up_fill_price = float(status.get("price", 0) or 0) or pair.up_leg.price
+                    except Exception as e:
+                        logger.debug("Fill check error (Up): %s", e)
 
-                # Check Down leg (same logic)
+                # Down leg — REST only
                 if not down_filled and not pair.down_leg.is_cancelled and pair.down_leg.clob_order_id:
-                    ws_bid = self.polymarket_feed.get_best_bid(pair.down_leg.token_id)
-                    ws_age = self.polymarket_feed.get_feed_age(pair.down_leg.token_id)
-                    if ws_age is not None and ws_age < 5 and ws_bid > 0:
-                        if ws_bid < pair.down_leg.price - 0.005:
-                            status = self.clob_manager.get_order_status(pair.down_leg.clob_order_id)
-                            if float(status.get("size_matched", 0) or 0) > 0:
-                                down_filled = True
-                    else:
+                    try:
                         status = self.clob_manager.get_order_status(pair.down_leg.clob_order_id)
-                        if status.get("status") == "FILLED" or float(status.get("size_matched", 0) or 0) > 0:
+                        matched = float(status.get("size_matched", 0) or 0)
+                        if status.get("status") == "FILLED" or matched > 0:
                             down_filled = True
+                            down_fill_price = float(status.get("price", 0) or 0) or pair.down_leg.price
+                    except Exception as e:
+                        logger.debug("Fill check error (Down): %s", e)
 
-            self.mm_engine.update_fill_status(pair, up_filled, down_filled)
+            self.mm_engine.update_fill_status(pair, up_filled, down_filled,
+                                              up_fill_price, down_fill_price)
 
     async def _check_early_exits(self):
         """Single-sided fills: re-chase the unfilled side, then stop-loss if that fails.

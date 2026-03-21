@@ -50,6 +50,8 @@ trading:
   order_size: 5.0
   # One trade at a time (low capital mode)
   max_concurrent_pairs: 1
+  rechase_enabled: true
+  stop_loss_enabled: true
 
 # Arb engine config
 arb:
