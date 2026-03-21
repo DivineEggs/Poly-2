@@ -115,12 +115,18 @@ class ClobManager:
         logger.info("CLOB client initialized — address: %s", self._client.get_address())
 
     def get_usdc_balance(self) -> float:
-        """Get USDC balance from Polymarket account."""
+        """Get USDC balance from Polymarket account via REST API."""
         try:
-            # Use CLOB client's native balance method (checks Polymarket ledger)
-            balance = self._client.get_balance()
-            if balance is not None:
-                return float(balance)
+            import requests
+            # Use Polymarket's balance endpoint
+            r = requests.get(
+                f"{self.CLOB_HOST}/user",
+                timeout=5,
+            )
+            if r.status_code == 200:
+                data = r.json()
+                balance = float(data.get("balance", 0))
+                return balance
             return -1.0
         except Exception as e:
             logger.warning("Failed to check balance: %s", e)

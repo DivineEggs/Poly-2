@@ -82,7 +82,11 @@ class TraderV2:
         )
 
         # Auto-redeemer (claims resolved positions → USDC)
-        self.redeemer = AutoRedeemer(self.config)
+        try:
+            self.redeemer = AutoRedeemer(self.config)
+        except Exception as e:
+            logger.warning("Auto-redeemer disabled: %s", e)
+            self.redeemer = None
 
         # Arb engine (latency arbitrage on price moves)
         self.arb_engine = ArbEngine(
@@ -243,7 +247,8 @@ class TraderV2:
                 self._resolve_expired()
 
                 # Auto-redeem resolved positions (every 60s)
-                self.redeemer.check_and_redeem()
+                if self.redeemer:
+                    self.redeemer.check_and_redeem()
 
                 # Health update
                 if now - last_health > self.config.timing.health_write_interval:
