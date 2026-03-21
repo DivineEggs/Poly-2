@@ -86,13 +86,13 @@ class WindowTracker:
     Call tick() frequently with current prices to capture window opens.
     """
 
-    TIMEFRAMES = [
+    ALL_TIMEFRAMES = [
         ("5m", 300),
         ("15m", 900),
         ("4h", 14400),
     ]
 
-    ASSETS = ["BTC", "ETH", "SOL"]
+    ALL_ASSETS = ["BTC", "ETH", "SOL"]
 
     def __init__(self, config=None, lookback_windows=1, lookahead_windows=4):
         self.config = config
@@ -101,6 +101,15 @@ class WindowTracker:
         self.lookahead = lookahead_windows
         self._start_prices_captured: set[str] = set()
         self._log_file = None
+
+        # Filter to only configured timeframes and assets
+        if config:
+            allowed_tf = set(config.trading.allowed_timeframes)
+            self.TIMEFRAMES = [(n, s) for n, s in self.ALL_TIMEFRAMES if n in allowed_tf]
+            self.ASSETS = [a for a in self.ALL_ASSETS if a in config.trading.allowed_assets]
+        else:
+            self.TIMEFRAMES = self.ALL_TIMEFRAMES
+            self.ASSETS = self.ALL_ASSETS
 
     def set_log_file(self, path: str):
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)

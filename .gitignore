@@ -7,3 +7,6 @@ data/
 logs/
 *.log
 *.bak
+.env
+venv/
+__pycache__/

@@ -26,8 +26,15 @@ class TradingConfig:
     min_spread_profit: float = 0.02
     max_orders_per_window: int = 1
     cancel_time_remaining: int = 15
-    allowed_assets: list = field(default_factory=lambda: ["BTC", "ETH"])
+    allowed_assets: list = field(default_factory=lambda: ["BTC", "ETH", "SOL"])
     allowed_timeframes: list = field(default_factory=lambda: ["5m"])
+    max_concurrent_pairs: int = 1      # One trade at a time (low capital mode)
+    rechase_enabled: bool = True       # Re-chase unfilled side
+    rechase_max_attempts: int = 3      # Max re-chase attempts
+    rechase_wait_seconds: float = 5.0  # Wait before first re-chase
+    stop_loss_enabled: bool = True     # SL after failed re-chase
+    stop_loss_cents: float = 0.03      # Max loss per token on single-side exit
+    min_usdc_balance: float = 3.0      # Min USDC to trade
     # Legacy fields (kept for backward compat, unused in V2)
     min_edge: float = 0.05
     cancel_edge_threshold: float = 0.01
@@ -98,6 +105,20 @@ class ArbConfig:
 
 
 @dataclass
+class SnipeConfig:
+    enabled: bool = True
+    max_seconds_remaining: int = 30
+    min_seconds_remaining: int = 5
+    min_move_pct: float = 0.15
+    min_edge: float = 0.02
+    max_buy_price: float = 0.99
+    min_buy_price: float = 0.90
+    order_size_dollars: float = 5.0
+    max_concurrent: int = 2
+    cooldown_per_window: float = 10.0
+
+
+@dataclass
 class LoggingConfig:
     level: str = "INFO"
     file_level: str = "DEBUG"
@@ -117,6 +138,7 @@ class Config:
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     taker_mode: TakerModeConfig = field(default_factory=TakerModeConfig)
     arb: ArbConfig = field(default_factory=ArbConfig)
+    snipe: SnipeConfig = field(default_factory=SnipeConfig)
     dry_run: bool = False
     paper_mode: bool = False
     shield_threshold: float = 0.001  # Convenience access for market_maker
@@ -234,6 +256,7 @@ def load_config(path: str = None) -> Config:
     _apply_section(cfg.logging, data.get("logging"))
     _apply_section(cfg.taker_mode, data.get("taker_mode"))
     _apply_section(cfg.arb, data.get("arb"))
+    _apply_section(cfg.snipe, data.get("snipe"))
 
     # Sync shield threshold for convenience
     cfg.shield_threshold = cfg.shield.threshold

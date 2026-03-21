@@ -35,7 +35,7 @@ timing:
   shutdown_timeout: 10
   stale_feed_timeout: 30
 trading:
-  spread_capture_enabled: false
+  spread_capture_enabled: true
   allowed_assets:
   - BTC
   - ETH
@@ -44,20 +44,35 @@ trading:
   - 5m
   cancel_time_remaining: 15
   max_orders_per_window: 1
-  max_position: 30.0
+  max_position: 10.0
   max_single_exposure: 10.0
-  min_spread_profit: 0.04
+  min_spread_profit: 0.03
   order_size: 5.0
+  # One trade at a time (low capital mode)
+  max_concurrent_pairs: 1
 
 # Arb engine config
 arb:
-  enabled: true
+  enabled: false
   order_size: 5.0
-  max_exposure: 15.0
-  min_edge: 0.05
-  cooldown_seconds: 30
+  max_exposure: 10.0
+  min_edge: 0.04
+  cooldown_seconds: 15
   move_threshold_pct: 0.2
   time_weight_early: 0.3
   time_weight_late: 0.7
   sell_discount_from_fair: 0.02
-  sell_timeout_seconds: 60
+  sell_timeout_seconds: 45
+
+# Late snipe — buy near-certain outcomes in final 30s
+snipe:
+  enabled: false
+  max_seconds_remaining: 30
+  min_seconds_remaining: 5
+  min_move_pct: 0.15
+  min_edge: 0.02
+  max_buy_price: 0.99
+  min_buy_price: 0.90
+  order_size_dollars: 5.0
+  max_concurrent: 2
+  cooldown_per_window: 10

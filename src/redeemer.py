@@ -47,7 +47,7 @@ class AutoRedeemer:
             from py_builder_signing_sdk.sdk_types import BuilderApiKeyCreds
             from poly_web3 import RELAYER_URL, PolyWeb3Service
 
-            funder = "os.getenv("PROXY_WALLET", "YOUR_PROXY_WALLET")"
+            funder = env.get("PROXY_WALLET", "")
 
             client = ClobClient(
                 "https://clob.polymarket.com",

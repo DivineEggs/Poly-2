@@ -27,8 +27,8 @@ logger = get_logger("clob")
 _ENV_PATH = os.path.join(PROJECT_ROOT, ".env")
 
 
-def _load_private_key() -> str:
-    """Load POLYGON_PRIVATE_KEY from .env file."""
+def _load_env_value(key_name: str) -> str:
+    """Load a value from .env file by key name."""
     if not os.path.exists(_ENV_PATH):
         raise FileNotFoundError(f".env file not found at {_ENV_PATH}")
 
@@ -38,13 +38,23 @@ def _load_private_key() -> str:
             if line.startswith("#") or "=" not in line:
                 continue
             key, _, value = line.partition("=")
-            if key.strip() == "POLYGON_PRIVATE_KEY":
-                value = value.strip().strip("'\"")
-                if not value:
-                    raise ValueError("POLYGON_PRIVATE_KEY is empty in .env")
-                return value
+            if key.strip() == key_name:
+                return value.strip().strip("'\"")
 
-    raise ValueError("POLYGON_PRIVATE_KEY not found in .env")
+    return ""
+
+
+def _load_private_key() -> str:
+    """Load POLYGON_PRIVATE_KEY from .env file."""
+    value = _load_env_value("POLYGON_PRIVATE_KEY")
+    if not value:
+        raise ValueError("POLYGON_PRIVATE_KEY not found or empty in .env")
+    return value
+
+
+def _load_funder() -> str:
+    """Load PROXY_WALLET from .env file."""
+    return _load_env_value("PROXY_WALLET")
 
 
 class ClobManager:
@@ -61,8 +71,6 @@ class ClobManager:
     CLOB_HOST = "https://clob.polymarket.com"
     CHAIN_ID = 137
     SIGNATURE_TYPE = 2  # POLY_GNOSIS_SAFE (MetaMask via Polymarket proxy)
-    FUNDER = "os.getenv("PROXY_WALLET", "YOUR_PROXY_WALLET")"  # Polymarket proxy wallet
-
     def __init__(self, config: Config):
         self.config = config
         self._lock = threading.Lock()
@@ -77,14 +85,15 @@ class ClobManager:
         # Initialize the CLOB client at Level 2
         logger.info("Initializing CLOB client (Level 2)...")
         private_key = _load_private_key()
+        funder = _load_funder()
 
         # Step 1: Create base client
         base_client = ClobClient(
-            host=self.CLOB_HOST,
-            chain_id=self.CHAIN_ID,
+            host="https://clob.polymarket.com",
+            chain_id=137,
             key=private_key,
-            signature_type=self.SIGNATURE_TYPE,
-            funder=self.FUNDER,
+            signature_type=2,
+            funder=funder,
         )
 
         # Step 2: Derive API credentials
@@ -93,15 +102,49 @@ class ClobManager:
 
         # Step 3: Re-create client with creds (Level 2)
         self._client = ClobClient(
-            host=self.CLOB_HOST,
-            chain_id=self.CHAIN_ID,
+            host="https://clob.polymarket.com",
+            chain_id=137,
             key=private_key,
             creds=creds,
-            signature_type=self.SIGNATURE_TYPE,
-            funder=self.FUNDER,
+            signature_type=2,
+            funder=funder,
         )
 
+        self._funder = funder
+        self._private_key = private_key
         logger.info("CLOB client initialized — address: %s", self._client.get_address())
+
+    def get_usdc_balance(self) -> float:
+        """Get USDC balance from Polygon chain. Returns balance in dollars."""
+        try:
+            from web3 import Web3
+            w3 = Web3(Web3.HTTPProvider("https://polygon-bor-rpc.publicnode.com"))
+            account = w3.eth.account.from_key(self._private_key).address
+            # Check both USDC addresses (bridged and native)
+            for usdc_addr in [
+                "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",  # Native USDC
+                "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",  # Bridged USDC.e
+            ]:
+                data = "0x70a08231" + account[2:].lower().zfill(64)
+                result = w3.eth.call({"to": usdc_addr, "data": data})
+                raw = int(result.hex(), 16)
+                if raw > 0:
+                    return raw / 1e6
+            # Also check funder/proxy wallet if different
+            if self._funder and self._funder.lower() != account.lower():
+                for usdc_addr in [
+                    "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+                    "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
+                ]:
+                    data = "0x70a08231" + self._funder[2:].lower().zfill(64)
+                    result = w3.eth.call({"to": usdc_addr, "data": data})
+                    raw = int(result.hex(), 16)
+                    if raw > 0:
+                        return raw / 1e6
+            return 0.0
+        except Exception as e:
+            logger.warning("Failed to check USDC balance: %s", e)
+            return -1.0  # Return -1 to indicate check failed (don't block trading)
 
     def place_order(self, token_id: str, side: str, price: float, size: float,
                     neg_risk: bool = False) -> dict:

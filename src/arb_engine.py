@@ -13,6 +13,7 @@ Strategy:
   5. Immediately post maker sell at entry + markup to capture quick profit
   6. If sell doesn't fill within timeout, hold to expiry as fallback
 """
+import math
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -399,13 +400,19 @@ class ArbEngine:
     def _calculate_fair_value(self, pct_move: float, time_remaining: float,
                                total_window: float, volatility: float) -> float:
         """
-        Calculate fair value of the winning side given price move and time remaining.
+        Calculate fair value using normal CDF model.
 
-        Model:
-        - Base value = 0.50 (50/50 at window start)
-        - Adjustment = (pct_move / volatility_estimate) * time_weight
-        - Early in window: conservative (move might reverse)
-        - Late in window: aggressive (move likely to stick)
+        P(up) = Φ(adjusted_move / sigma_remaining)
+
+        Where:
+        - adjusted_move accounts for mean reversion (moves early in round
+          are less likely to stick)
+        - sigma_remaining shrinks as time passes (less uncertainty)
+
+        This naturally produces:
+        - Early in round, small move → ~50% (uncertain)
+        - Late in round, same move → ~70-80% (likely to stick)
+        - Big moves any time → high probability
 
         Args:
             pct_move: Absolute % move from window start price
@@ -414,44 +421,35 @@ class ArbEngine:
             volatility: Realized volatility estimate (std of returns)
 
         Returns:
-            Fair value probability [0.5, 0.99]
+            Fair value probability [0.50, 0.95]
         """
-        # Time weight: how confident are we the move will stick?
-        fraction_remaining = time_remaining / total_window if total_window > 0 else 0.5
+        if time_remaining <= 0 or total_window <= 0:
+            return 0.50
 
-        if fraction_remaining > 0.6:  # >3 min left in 5-min window
-            time_weight = self.arb_config.time_weight_early
-        elif fraction_remaining < 0.4:  # <2 min left
-            time_weight = self.arb_config.time_weight_late
-        else:
-            # Linear interpolation between early and late
-            t = (0.6 - fraction_remaining) / 0.2
-            time_weight = (self.arb_config.time_weight_early +
-                           t * (self.arb_config.time_weight_late -
-                                self.arb_config.time_weight_early))
+        # Convert % move to decimal
+        move_decimal = pct_move / 100.0
 
-        # Volatility estimate: use realized vol, with a floor
-        vol_estimate = max(volatility, 0.0001)  # Floor to avoid division by zero
+        # Annualized vol from realized vol (per-second stdev → annualized)
+        # If volatility is per-tick, scale appropriately
+        vol_annualized = max(volatility * math.sqrt(365.25 * 24 * 3600), 0.3)
 
-        # Normalize the move by volatility
-        # Higher move relative to vol = more confident = higher fair value
-        normalized_move = pct_move / (vol_estimate * 100)  # vol is in decimal form
+        # Sigma remaining: how much more can the price move?
+        t_yr = time_remaining / (365.25 * 24 * 3600)
+        sigma_remaining = vol_annualized * max(math.sqrt(t_yr), 1e-10)
 
-        # Cap the normalized move to avoid extreme values
-        normalized_move = min(normalized_move, 5.0)
+        # Mean reversion adjustment: moves early in round are less sticky
+        mean_reversion = 0.18
+        fraction_elapsed = 1.0 - (time_remaining / total_window)
+        adjusted_move = move_decimal * (1.0 - mean_reversion * (1.0 - fraction_elapsed))
 
-        # Fair value: 0.50 + adjustment
-        adjustment = normalized_move * time_weight * 0.15  # Scale factor
-        fair_value = 0.50 + adjustment
-
-        # Additional boost for very late windows with strong moves
-        if fraction_remaining < 0.2 and pct_move > 0.3:
-            # Less than 1 min left with >0.3% move — very likely to stick
-            fair_value = max(fair_value, 0.65)
-
-        if fraction_remaining < 0.1 and pct_move > 0.2:
-            # Less than 30s left — almost certain
-            fair_value = max(fair_value, 0.70)
+        # Normal CDF: P(price stays above start)
+        try:
+            from scipy.stats import norm
+            fair_value = float(norm.cdf(adjusted_move / sigma_remaining))
+        except ImportError:
+            # Fallback: approximate CDF with tanh
+            z = adjusted_move / sigma_remaining
+            fair_value = 0.5 * (1.0 + math.tanh(z * 0.7978845608))
 
         # Clamp to [0.50, 0.95] — never be 100% sure
         fair_value = max(0.50, min(0.95, fair_value))
@@ -565,7 +563,7 @@ class ArbEngine:
             if pos.sell_order_id and not pos.sell_filled:
                 self._check_sell_fill(pos)
 
-            # If sell hasn't filled and timeout exceeded, cancel and hold to expiry
+            # If sell hasn't filled and timeout exceeded, cancel and market-sell to exit
             if (pos.sell_order_id and not pos.sell_filled and
                 pos.sell_posted_at > 0 and
                 now - pos.sell_posted_at > pos.sell_timeout):
@@ -575,14 +573,64 @@ class ArbEngine:
                     continue
 
                 logger.info(
-                    "⏰ ARB #%d: sell timeout (%.0fs), cancelling sell → holding to expiry",
+                    "⏰ ARB #%d: sell timeout (%.0fs), cancelling → market sell to exit",
                     pos.position_id, now - pos.sell_posted_at,
                 )
                 try:
-                    self.clob.cancel_order(pos.sell_order_id)
+                    if self.clob:
+                        self.clob.cancel_order(pos.sell_order_id)
                 except Exception as e:
                     logger.warning("Failed to cancel arb sell order: %s", e)
-                pos.sell_order_id = ""  # Clear so we don't try to cancel again
+
+                # Market sell: get best bid and sell there
+                book = fetch_order_book(pos.token_id)
+                if book and book.bids.best_price > 0:
+                    exit_price = round(max(0.01, book.bids.best_price), 2)
+                else:
+                    exit_price = round(max(0.01, pos.entry_price - 0.03), 2)
+
+                tokens = pos.size / pos.entry_price
+                if self.config.paper_mode:
+                    # Simulate the exit
+                    revenue = tokens * exit_price
+                    pnl = revenue - pos.size
+                    pos.sell_filled = True
+                    pos.sell_price = exit_price
+                    pos.resolved = True
+                    pos.pnl = pnl
+                    pos.outcome = "market_exit"
+                    self.stats["total_pnl"] += pnl
+                    if pnl >= 0:
+                        self.stats["wins"] += 1
+                    else:
+                        self.stats["losses"] += 1
+                    logger.info("📝 [PAPER] ARB #%d market exit @ %.2f, P&L: $%.4f",
+                                pos.position_id, exit_price, pnl)
+                elif self.clob:
+                    result = self.clob.place_order(
+                        token_id=pos.token_id, side="SELL",
+                        price=exit_price, size=tokens,
+                    )
+                    if result.get("success"):
+                        revenue = tokens * exit_price
+                        buy_fee = pos.size * 0.01
+                        pnl = revenue - pos.size - buy_fee
+                        pos.sell_filled = True
+                        pos.sell_price = exit_price
+                        pos.resolved = True
+                        pos.pnl = pnl
+                        pos.outcome = "market_exit"
+                        self.stats["total_pnl"] += pnl
+                        if pnl >= 0:
+                            self.stats["wins"] += 1
+                        else:
+                            self.stats["losses"] += 1
+                        logger.info("🛑 ARB #%d market exit @ %.2f (entry %.2f), P&L: $%.4f",
+                                    pos.position_id, exit_price, pos.entry_price, pnl)
+                    else:
+                        logger.error("❌ ARB #%d market exit failed: %s",
+                                     pos.position_id, result.get("error", "unknown"))
+                        pos.sell_order_id = ""  # Try again next tick
 
     def _post_sell_order(self, pos: ArbPosition):
         """Post a maker sell order just below fair value to capture the mispricing edge."""
@@ -685,7 +733,11 @@ class ArbEngine:
     # ── Resolution (fallback for unsold positions) ────────────────────
 
     def _resolve_expired(self):
-        """Resolve arb positions whose windows have expired."""
+        """Resolve arb positions whose windows have expired.
+        
+        If position hasn't been sold yet, attempt emergency market sell.
+        We never hold to resolution — that's a coin flip.
+        """
         for key, pos in list(self.positions.items()):
             if pos.resolved or not pos.is_expired:
                 continue
@@ -697,68 +749,63 @@ class ArbEngine:
                 pos.outcome = "unfilled"
                 continue
 
-            # Already sold for quick profit — skip
+            # Already sold — skip
             if pos.sell_filled:
                 continue
 
-            # Cancel any pending sell order before resolution
+            # Cancel any pending sell order
             if pos.sell_order_id and not pos.sell_filled:
                 try:
-                    self.clob.cancel_order(pos.sell_order_id)
-                    logger.debug("Cancelled pending arb sell for expired #%d", pos.position_id)
+                    if self.clob:
+                        self.clob.cancel_order(pos.sell_order_id)
                 except Exception:
                     pass
 
-            # Determine outcome based on final crypto price
-            current_price = self.price_feed.get_price(pos.asset)
-            if current_price <= 0:
-                logger.warning("Cannot resolve arb #%d: no price data for %s",
-                               pos.position_id, pos.asset)
-                continue
+            # Emergency: position expired without selling — market sell now
+            tokens = pos.size / pos.entry_price
+            book = fetch_order_book(pos.token_id)
+            exit_price = 0.01
+            if book and book.bids.best_price > 0:
+                exit_price = round(book.bids.best_price, 2)
 
-            won = False
-            if pos.side == "Up" and current_price >= pos.window_start_price:
-                won = True
-            elif pos.side == "Down" and current_price < pos.window_start_price:
-                won = True
-
-            if won:
-                # Winner pays $1.00 per token
-                tokens = pos.size / pos.entry_price
-                payout = tokens * 1.0
-                buy_fee = pos.size * 0.01  # Taker fee on original buy
-                pnl = payout - pos.size - buy_fee
-                pos.pnl = pnl
-                pos.outcome = "win"
-                self.stats["wins"] += 1
-                self.stats["largest_win"] = max(self.stats["largest_win"], pnl)
-                logger.info(
-                    "✅ ARB WIN #%d (held to expiry): %s %s %s | entry=%.3f | "
-                    "P&L=$%.4f",
-                    pos.position_id, pos.asset, pos.side,
-                    pos.timeframe, pos.entry_price, pnl,
-                )
+            if self.config.paper_mode or not self.clob:
+                revenue = tokens * exit_price
+                pnl = revenue - pos.size
             else:
-                # Loser pays $0.00
-                pnl = -pos.size  # Lost entire position
-                pos.pnl = pnl
-                pos.outcome = "loss"
+                result = self.clob.place_order(
+                    token_id=pos.token_id, side="SELL",
+                    price=exit_price, size=tokens,
+                )
+                if result.get("success"):
+                    revenue = tokens * exit_price
+                    buy_fee = pos.size * 0.01
+                    pnl = revenue - pos.size - buy_fee
+                else:
+                    # Failed to sell — estimate worst case
+                    pnl = -pos.size
+                    logger.error("❌ Emergency sell failed for ARB #%d", pos.position_id)
+
+            pos.pnl = pnl
+            pos.resolved = True
+            pos.outcome = "emergency_exit"
+            self.stats["total_pnl"] += pnl
+            if pnl >= 0:
+                self.stats["wins"] += 1
+            else:
                 self.stats["losses"] += 1
                 self.stats["largest_loss"] = min(self.stats["largest_loss"], pnl)
-                logger.info(
-                    "❌ ARB LOSS #%d (held to expiry): %s %s %s | entry=%.3f | "
-                    "P&L=$%.4f",
-                    pos.position_id, pos.asset, pos.side,
-                    pos.timeframe, pos.entry_price, pnl,
-                )
 
-            pos.resolved = True
-            self.stats["total_pnl"] += pnl
-            self.stats["total_edge_captured"] += pos.edge if won else 0
+            logger.warning(
+                "⚠️ ARB #%d emergency exit (expired): %s %s | entry=%.3f exit=%.3f | "
+                "P&L=$%.4f",
+                pos.position_id, pos.asset, pos.side,
+                pos.entry_price, exit_price, pnl,
+            )
 
             # Update average edge
             filled = self.stats["trades_filled"]
             if filled > 0:
+                self.stats["total_edge_captured"] += pos.edge if pnl >= 0 else 0
                 self.stats["avg_edge"] = self.stats["total_edge_captured"] / filled
 
     # ── Helpers ───────────────────────────────────────────────────────
