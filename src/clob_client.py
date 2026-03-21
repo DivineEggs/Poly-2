@@ -120,7 +120,20 @@ class ClobManager:
             from web3 import Web3
             w3 = Web3(Web3.HTTPProvider("https://polygon-bor-rpc.publicnode.com"))
             account = w3.eth.account.from_key(self._private_key).address
-            # Check both USDC addresses (bridged and native)
+            
+            # Check FUNDER (proxy wallet) first — that's where USDC is held with signature_type=2
+            if self._funder:
+                for usdc_addr in [
+                    "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",  # Native USDC
+                    "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",  # Bridged USDC.e
+                ]:
+                    data = "0x70a08231" + self._funder[2:].lower().zfill(64)
+                    result = w3.eth.call({"to": usdc_addr, "data": data})
+                    raw = int(result.hex(), 16)
+                    if raw > 0:
+                        return raw / 1e6
+            
+            # Fallback: check EOA if funder is empty or no balance found
             for usdc_addr in [
                 "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",  # Native USDC
                 "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",  # Bridged USDC.e
@@ -130,17 +143,7 @@ class ClobManager:
                 raw = int(result.hex(), 16)
                 if raw > 0:
                     return raw / 1e6
-            # Also check funder/proxy wallet if different
-            if self._funder and self._funder.lower() != account.lower():
-                for usdc_addr in [
-                    "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
-                    "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174",
-                ]:
-                    data = "0x70a08231" + self._funder[2:].lower().zfill(64)
-                    result = w3.eth.call({"to": usdc_addr, "data": data})
-                    raw = int(result.hex(), 16)
-                    if raw > 0:
-                        return raw / 1e6
+            
             return 0.0
         except Exception as e:
             logger.warning("Failed to check USDC balance: %s", e)
