@@ -44,12 +44,13 @@ logger = get_logger("late_snipe")
 class SnipeConfig:
     """Late snipe configuration."""
     enabled: bool = True
-    max_seconds_remaining: int = 30       # Only snipe in final 30s
-    min_seconds_remaining: int = 5        # Don't snipe with < 5s (might not fill)
-    min_move_pct: float = 0.15            # Minimum % move from start to consider
-    min_edge: float = 0.02                # P(win) must exceed price by this much
+    max_seconds_remaining: int = 15       # Only snipe in final 15s
+    min_seconds_remaining: int = 3        # Don't snipe with < 3s (might not fill)
+    min_move_pct: float = 0.07            # ~$50 on BTC at $70k
+    min_dollar_move: float = 50.0         # BTC must be $50+ from start price
+    min_edge: float = 0.01                # P(win) must exceed price by this much
     max_buy_price: float = 0.99           # Never pay more than 99¢
-    min_buy_price: float = 0.90           # Don't buy below 90¢ (too uncertain)
+    min_buy_price: float = 0.80           # Don't buy below 80¢
     order_size_dollars: float = 5.0       # $ per snipe
     max_concurrent: int = 2               # Max simultaneous snipes
     cooldown_per_window: float = 10.0     # Don't re-snipe same window within 10s
@@ -149,6 +150,12 @@ class LateSnipeEngine:
             pct_move = ((current_price - start_price) / start_price) * 100
             
             if abs(pct_move) < self.snipe_config.min_move_pct:
+                continue
+
+            # Dollar move filter — e.g. BTC must be $50+ from start
+            dollar_move = abs(current_price - start_price)
+            min_dollar = getattr(self.snipe_config, 'min_dollar_move', 0)
+            if min_dollar > 0 and dollar_move < min_dollar:
                 continue
             
             # Calculate probability using CDF

@@ -109,8 +109,9 @@ class SnipeConfig:
     enabled: bool = True
     max_seconds_remaining: int = 30
     min_seconds_remaining: int = 5
-    min_move_pct: float = 0.15
-    min_edge: float = 0.02
+    min_move_pct: float = 0.07
+    min_dollar_move: float = 50.0
+    min_edge: float = 0.01
     max_buy_price: float = 0.99
     min_buy_price: float = 0.90
     order_size_dollars: float = 5.0

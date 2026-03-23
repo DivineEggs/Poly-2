@@ -35,7 +35,7 @@ timing:
   shutdown_timeout: 10
   stale_feed_timeout: 30
 trading:
-  spread_capture_enabled: true
+  spread_capture_enabled: false
   allowed_assets:
   - BTC
   - ETH
@@ -66,15 +66,16 @@ arb:
   sell_discount_from_fair: 0.02
   sell_timeout_seconds: 45
 
-# Late snipe — buy near-certain outcomes in final 30s
+# Late snipe — buy near-certain outcomes in final 15s
 snipe:
-  enabled: false
-  max_seconds_remaining: 30
-  min_seconds_remaining: 5
-  min_move_pct: 0.15
-  min_edge: 0.02
+  enabled: true
+  max_seconds_remaining: 15
+  min_seconds_remaining: 3
+  min_move_pct: 0.07        # ~$50 on BTC at $70k
+  min_dollar_move: 50       # BTC must be $50+ from start price
+  min_edge: 0.01
   max_buy_price: 0.99
-  min_buy_price: 0.90
+  min_buy_price: 0.80
   order_size_dollars: 5.0
   max_concurrent: 2
   cooldown_per_window: 10
