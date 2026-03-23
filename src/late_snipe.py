@@ -54,6 +54,9 @@ class SnipeConfig:
     order_size_dollars: float = 5.0       # $ per snipe
     max_concurrent: int = 2               # Max simultaneous snipes
     cooldown_per_window: float = 10.0     # Don't re-snipe same window within 10s
+    # Dual-entry settings
+    maker_bid_offset: float = 0.01        # Post maker bid this much below ask
+    taker_seconds_remaining: int = 7      # Fire taker order when this many seconds left
 
 
 class LateSnipeEngine:
@@ -97,135 +100,196 @@ class LateSnipeEngine:
                      self.snipe_config.max_seconds_remaining,
                      self.snipe_config.min_move_pct)
 
+    def _check_conditions(self, window, time_remaining: float):
+        """
+        Check all snipe entry conditions for a window.
+        Returns (buy_side, token_id, ask_price, probability, pct_move, tokens) or None.
+        """
+        if not window.up_token_id or not window.down_token_id:
+            return None
+
+        start_price = window.start_price
+        if start_price <= 0:
+            return None
+
+        current_price = self.price_feed.get_price(window.asset)
+        if current_price <= 0:
+            return None
+
+        pct_move = ((current_price - start_price) / start_price) * 100
+
+        if abs(pct_move) < self.snipe_config.min_move_pct:
+            return None
+
+        dollar_move = abs(current_price - start_price)
+        min_dollar = getattr(self.snipe_config, 'min_dollar_move', 0)
+        if min_dollar > 0 and dollar_move < min_dollar:
+            return None
+
+        probability = self._calc_probability(
+            pct_move=abs(pct_move),
+            time_remaining=time_remaining,
+            asset=window.asset,
+        )
+
+        buy_side = "Up" if pct_move > 0 else "Down"
+        token_id = window.up_token_id if buy_side == "Up" else window.down_token_id
+
+        book = fetch_order_book(token_id)
+        if not book or book.asks.best_price <= 0:
+            return None
+
+        ask_price = book.asks.best_price
+
+        if ask_price > self.snipe_config.max_buy_price:
+            return None
+        if ask_price < self.snipe_config.min_buy_price:
+            return None
+
+        edge = probability - ask_price
+        if edge < self.snipe_config.min_edge:
+            return None
+
+        depth = book.asks.depth_at_price(ask_price + 0.02, side="ask")
+        tokens_needed = self.snipe_config.order_size_dollars / ask_price
+        if depth < tokens_needed * 0.5:
+            return None
+
+        return buy_side, token_id, ask_price, probability, pct_move, tokens_needed
+
+    def _binance_still_moving(self, asset: str, direction: str) -> bool:
+        """
+        Check if Binance price is still moving in the same direction over last 5s.
+        Returns True if confirmed, or True if data unavailable (don't block on uncertainty).
+        """
+        try:
+            state = self.price_feed.get_state(asset)
+            if not state or not state.price_history:
+                return True  # Can't confirm, allow trade
+            history = state.price_history  # list of (timestamp, price)
+            now = time.time()
+            recent = [(t, p) for t, p in history if now - t <= 5]
+            if len(recent) < 2:
+                return True
+            oldest_price = recent[0][1]
+            newest_price = recent[-1][1]
+            move = newest_price - oldest_price
+            if direction == "Up":
+                return move >= 0  # Still moving up (or flat)
+            else:
+                return move <= 0  # Still moving down (or flat)
+        except Exception:
+            return True  # Don't block on error
+
     async def check_opportunities(self):
-        """Scan all active windows for late snipe opportunities."""
+        """
+        Dual-entry snipe logic:
+        - At 15s: post MAKER bid at ask - 1¢
+        - At ≤7s: re-check all conditions + Binance velocity → post TAKER at ask
+        Both orders are independent; double position is intentional.
+        """
         if not self.snipe_config.enabled:
             return
-            
-        # Check concurrent limit
-        active_count = len(self._active_snipes)
-        if active_count >= self.snipe_config.max_concurrent:
-            return
-        
+
         now = time.time()
-        
-        # Resolve any expired snipes first
         self._resolve_expired()
-        
+
         active_windows = self.window_tracker.get_active_windows()
-        
+
         for window in active_windows:
             time_remaining = window.end_ts - now
-            
-            # Only consider windows in the snipe zone
-            if time_remaining > self.snipe_config.max_seconds_remaining:
-                continue
+
             if time_remaining < self.snipe_config.min_seconds_remaining:
                 continue
-                
-            # Skip if already sniped this window recently
+            if time_remaining > self.snipe_config.max_seconds_remaining:
+                continue
+
+            # ── TAKER CHECK (≤7s remaining) ───────────────────────────────
+            taker_thresh = getattr(self.snipe_config, 'taker_seconds_remaining', 7)
+            existing = self._active_snipes.get(window.key)
+            if existing and not existing.get("taker_placed") and time_remaining <= taker_thresh:
+                # Re-check all conditions
+                result = self._check_conditions(window, time_remaining)
+                if result:
+                    buy_side, token_id, ask_price, probability, pct_move, tokens = result
+                    # Must be same direction as maker
+                    if buy_side == existing.get("side"):
+                        # Binance velocity confirmation
+                        if self._binance_still_moving(window.asset, buy_side):
+                            logger.info(
+                                "⚡ TAKER ENTRY: %s %s %s | %.1fs left | "
+                                "Binance confirmed | ask=%.0f¢",
+                                window.asset, window.timeframe, buy_side,
+                                time_remaining, ask_price * 100,
+                            )
+                            await self._execute_snipe(
+                                window=window,
+                                buy_side=buy_side,
+                                token_id=token_id,
+                                ask_price=ask_price,
+                                probability=probability,
+                                pct_move=pct_move,
+                                tokens=tokens,
+                                order_type="taker",
+                            )
+                            existing["taker_placed"] = True
+                        else:
+                            logger.info(
+                                "⏭ Taker skipped %s %s — Binance reversing",
+                                window.asset, buy_side,
+                            )
+                    else:
+                        logger.info(
+                            "⏭ Taker skipped %s — direction flipped (%s → %s)",
+                            window.key, existing.get("side"), buy_side,
+                        )
+                continue  # Window already has active snipe, no new maker
+
+            # Skip if already have any active snipe on this window
+            if window.key in self._active_snipes:
+                continue
+
+            # Skip if recently sniped and cooldown active
             last_snipe = self._sniped_windows.get(window.key, 0)
             if now - last_snipe < self.snipe_config.cooldown_per_window:
                 continue
-                
-            # Skip if already have an active snipe on this window
-            if window.key in self._active_snipes:
-                continue
-                
-            # Need token IDs
-            if not window.up_token_id or not window.down_token_id:
-                continue
-                
-            # Need start price
-            start_price = window.start_price
-            if start_price <= 0:
-                continue
-            
-            # Get current crypto price from Binance
-            current_price = self.price_feed.get_price(window.asset)
-            if current_price <= 0:
-                continue
-            
-            # Calculate move from start
-            pct_move = ((current_price - start_price) / start_price) * 100
-            
-            if abs(pct_move) < self.snipe_config.min_move_pct:
+
+            # Check concurrent maker limit
+            active_count = sum(1 for s in self._active_snipes.values()
+                               if not s.get("taker_only", False))
+            if active_count >= self.snipe_config.max_concurrent:
                 continue
 
-            # Dollar move filter — e.g. BTC must be $50+ from start
-            dollar_move = abs(current_price - start_price)
-            min_dollar = getattr(self.snipe_config, 'min_dollar_move', 0)
-            if min_dollar > 0 and dollar_move < min_dollar:
+            # ── MAKER ENTRY (first time seeing this window) ───────────────
+            result = self._check_conditions(window, time_remaining)
+            if not result:
                 continue
-            
-            # Calculate probability using CDF
-            probability = self._calc_probability(
-                pct_move=abs(pct_move),
-                time_remaining=time_remaining,
-                asset=window.asset,
-            )
-            
-            # Determine which side to buy
-            if pct_move > 0:
-                buy_side = "Up"
-                token_id = window.up_token_id
-            else:
-                buy_side = "Down"
-                token_id = window.down_token_id
-            
-            # Fetch order book to check ask price
-            book = fetch_order_book(token_id)
-            if not book or book.asks.best_price <= 0:
-                continue
-            
-            ask_price = book.asks.best_price
-            
-            # Check price bounds
-            if ask_price > self.snipe_config.max_buy_price:
-                continue
-            if ask_price < self.snipe_config.min_buy_price:
-                continue
-            
-            # THE KEY CHECK: probability must significantly exceed price
-            edge = probability - ask_price
-            if edge < self.snipe_config.min_edge:
-                logger.debug("Snipe skip %s %s: P=%.3f, ask=%.2f, edge=%.3f (need %.3f)",
-                             window.asset, buy_side, probability, ask_price,
-                             edge, self.snipe_config.min_edge)
-                continue
-            
-            # Check depth — need enough shares at this price
-            depth = book.asks.depth_at_price(ask_price + 0.02, side="ask")
-            tokens_needed = self.snipe_config.order_size_dollars / ask_price
-            if depth < tokens_needed * 0.5:
-                logger.debug("Snipe skip %s: insufficient depth (%.0f at ask)", 
-                             window.key, depth)
-                continue
-            
-            # 🎯 SNIPE IT
+
+            buy_side, token_id, ask_price, probability, pct_move, tokens_needed = result
+
             self.stats["opportunities"] += 1
-            
-            expected_profit = (1.0 - ask_price) * tokens_needed
-            expected_loss = ask_price * tokens_needed
-            ev = probability * expected_profit - (1 - probability) * expected_loss
-            
+            ev = probability * (1.0 - ask_price) * tokens_needed - \
+                 (1 - probability) * ask_price * tokens_needed
+
+            maker_price = round(max(ask_price - self.snipe_config.maker_bid_offset, 0.01), 2)
+
             logger.info(
-                "🎯 SNIPE: %s %s %s | %.1fs left | move=%+.3f%% | "
-                "P(win)=%.1f%% | ask=%.0f¢ | edge=%.1f%% | EV=$%.3f",
+                "🎯 MAKER SNIPE: %s %s %s | %.1fs left | move=%+.3f%% | "
+                "P(win)=%.1f%% | ask=%.0f¢ bid=%.0f¢ | EV=$%.3f",
                 window.asset, window.timeframe, buy_side,
                 time_remaining, pct_move,
-                probability * 100, ask_price * 100,
-                edge * 100, ev,
+                probability * 100, ask_price * 100, maker_price * 100, ev,
             )
-            
+
             await self._execute_snipe(
                 window=window,
                 buy_side=buy_side,
                 token_id=token_id,
-                ask_price=ask_price,
+                ask_price=maker_price,
                 probability=probability,
                 pct_move=pct_move,
                 tokens=tokens_needed,
+                order_type="maker",
             )
     
     def _calc_probability(self, pct_move: float, time_remaining: float, asset: str) -> float:
@@ -274,16 +338,18 @@ class LateSnipeEngine:
     
     async def _execute_snipe(self, window, buy_side: str, token_id: str,
                               ask_price: float, probability: float,
-                              pct_move: float, tokens: float):
-        """Place the snipe buy order."""
-        
+                              pct_move: float, tokens: float,
+                              order_type: str = "taker"):
+        """Place a snipe buy order. order_type is 'maker' or 'taker'."""
+        tag = "MAKER" if order_type == "maker" else "TAKER"
+
         if self.config.paper_mode:
-            order_id = f"snipe_paper_{window.key}"
-            logger.info("📝 [PAPER] SNIPE BUY %s %s @ %.2f¢ (%.1f tokens, P=%.1f%%)",
-                         buy_side, window.asset, ask_price * 100, tokens, probability * 100)
+            order_id = f"snipe_paper_{order_type}_{window.key}"
+            logger.info("📝 [PAPER] %s SNIPE BUY %s %s @ %.0f¢ (%.1f tokens, P=%.1f%%)",
+                        tag, buy_side, window.asset, ask_price * 100, tokens, probability * 100)
         elif self.config.dry_run:
-            logger.info("🔍 [DRY RUN] Would SNIPE %s %s @ %.2f¢", 
-                         buy_side, window.asset, ask_price * 100)
+            logger.info("🔍 [DRY RUN] Would %s SNIPE %s %s @ %.0f¢",
+                        tag, buy_side, window.asset, ask_price * 100)
             return
         else:
             result = self.clob.place_order(
@@ -293,32 +359,64 @@ class LateSnipeEngine:
                 size=tokens,
             )
             if not result.get("success"):
-                logger.error("❌ SNIPE failed: %s %s — %s", 
-                             buy_side, window.asset, result.get("error"))
+                logger.error("❌ %s SNIPE failed: %s %s — %s",
+                             tag, buy_side, window.asset, result.get("error"))
                 return
             order_id = result["orderID"]
-            logger.info("🎯 SNIPE PLACED: %s %s @ %.0f¢ → %s",
-                         buy_side, window.asset, ask_price * 100, order_id)
-        
-        # Track it
-        self._active_snipes[window.key] = {
-            "order_id": order_id,
-            "side": buy_side,
-            "asset": window.asset,
-            "token_id": token_id,
-            "entry_price": ask_price,
-            "tokens": tokens,
-            "cost": ask_price * tokens,
-            "probability": probability,
-            "pct_move": pct_move,
-            "window_end": window.end_ts,
-            "start_price": window.start_price,
-            "placed_at": time.time(),
-        }
-        self._sniped_windows[window.key] = time.time()
+            logger.info("✅ %s SNIPE PLACED: %s %s @ %.0f¢ → order %s",
+                        tag, buy_side, window.asset, ask_price * 100, order_id)
+
+        now = time.time()
+
+        if order_type == "maker" and window.key not in self._active_snipes:
+            # Create new snipe entry for this window
+            self._active_snipes[window.key] = {
+                "maker_order_id": order_id,
+                "taker_order_id": None,
+                "taker_placed": False,
+                "side": buy_side,
+                "asset": window.asset,
+                "token_id": token_id,
+                "entry_price": ask_price,
+                "tokens": tokens,
+                "cost": ask_price * tokens,
+                "probability": probability,
+                "pct_move": pct_move,
+                "window_end": window.end_ts,
+                "start_price": window.start_price,
+                "placed_at": now,
+            }
+        elif order_type == "taker" and window.key in self._active_snipes:
+            # Add taker order to existing entry
+            snipe = self._active_snipes[window.key]
+            snipe["taker_order_id"] = order_id
+            snipe["taker_placed"] = True
+            snipe["cost"] += ask_price * tokens  # Track combined cost
+            logger.info("📊 Dual position: maker @ %.0f¢ + taker @ %.0f¢ on %s %s",
+                        snipe["entry_price"] * 100, ask_price * 100,
+                        window.asset, buy_side)
+        else:
+            # Standalone taker (no prior maker)
+            self._active_snipes[window.key] = {
+                "maker_order_id": None,
+                "taker_order_id": order_id,
+                "taker_placed": True,
+                "side": buy_side,
+                "asset": window.asset,
+                "token_id": token_id,
+                "entry_price": ask_price,
+                "tokens": tokens,
+                "cost": ask_price * tokens,
+                "probability": probability,
+                "pct_move": pct_move,
+                "window_end": window.end_ts,
+                "start_price": window.start_price,
+                "placed_at": now,
+            }
+
+        self._sniped_windows[window.key] = now
         self.stats["trades"] += 1
-        
-        # Update running averages
+
         n = self.stats["trades"]
         self.stats["avg_entry_price"] = (
             (self.stats["avg_entry_price"] * (n - 1) + ask_price) / n
