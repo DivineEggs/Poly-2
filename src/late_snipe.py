@@ -342,6 +342,18 @@ class LateSnipeEngine:
             if not result.get("success"):
                 logger.error("❌ Snipe #%d failed: %s %s — %s",
                              entry_num, buy_side, window.asset, result.get("error"))
+                # Count failed attempt to prevent hammering same window
+                if window.key not in self._active_snipes:
+                    self._active_snipes[window.key] = {
+                        "side": buy_side, "asset": window.asset,
+                        "token_id": token_id, "window_end": window.end_ts,
+                        "entries_placed": 1, "last_entry_time": time.time(),
+                        "orders": [], "total_tokens": 0, "total_cost": 0,
+                        "avg_price": 0, "probability": probability, "placed_at": time.time(),
+                    }
+                else:
+                    self._active_snipes[window.key]["entries_placed"] += 1
+                    self._active_snipes[window.key]["last_entry_time"] = time.time()
                 return
             order_id = result["orderID"]
             logger.info("✅ SNIPE #%d PLACED: %s %s @ %.0f¢ (%.2f tokens) → %s",
