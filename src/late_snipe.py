@@ -110,6 +110,22 @@ class LateSnipeEngine:
             logger.debug("Snipe skip %s: no token IDs", key)
             return None
 
+        # $50 dollar move filter — requires accurate round start price from Binance klines
+        min_dollar = getattr(self.snipe_config, 'min_dollar_move', 0)
+        if min_dollar > 0:
+            start_price = window.start_price
+            if start_price <= 0:
+                logger.debug("Snipe skip %s: start_price not yet available (kline pending)", key)
+                return None
+            current_price = self.price_feed.get_price(window.asset)
+            if current_price <= 0:
+                logger.debug("Snipe skip %s: no Binance price", key)
+                return None
+            dollar_move = abs(current_price - start_price)
+            if dollar_move < min_dollar:
+                logger.debug("Snipe skip %s: $%.0f move < $%.0f min", key, dollar_move, min_dollar)
+                return None
+
         # Check both sides — buy whichever is at min_buy_price or higher
         candidates = [
             ("Up", window.up_token_id),

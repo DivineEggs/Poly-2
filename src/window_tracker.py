@@ -201,10 +201,47 @@ class WindowTracker:
                 })
 
             elif time_since_start > 5 and window.start_price <= 0:
-                window.start_price = asset_price
-                self._start_prices_captured.add(key)
-                logger.debug("Late start price fallback: %s %s $%.2f (%.1fs late)",
-                             window.asset, window.timeframe, asset_price, time_since_start)
+                # Bot started mid-round — fetch actual open price from Binance klines
+                open_price = self._fetch_candle_open(window.asset, window.start_ts)
+                if open_price > 0:
+                    window.start_price = open_price
+                    self._start_prices_captured.add(key)
+                    logger.info("Kline start price: %s %s $%.2f (round started %.0fs ago)",
+                                window.asset, window.timeframe, open_price, time_since_start)
+                else:
+                    # Kline unavailable — skip this window for $50 filter
+                    logger.debug("Kline unavailable for %s, skipping start price", key)
+
+    BINANCE_SYMBOL_MAP = {"BTC": "BTCUSDT", "ETH": "ETHUSDT", "SOL": "SOLUSDT"}
+
+    def _fetch_candle_open(self, asset: str, start_ts: int) -> float:
+        """
+        Fetch the opening price of the 5-min Binance candle at start_ts.
+        Uses Binance REST klines API — always accurate regardless of when bot started.
+        """
+        symbol = self.BINANCE_SYMBOL_MAP.get(asset)
+        if not symbol:
+            return 0.0
+        try:
+            import requests
+            url = "https://api.binance.com/api/v3/klines"
+            params = {
+                "symbol": symbol,
+                "interval": "5m",
+                "startTime": start_ts * 1000,  # milliseconds
+                "limit": 1,
+            }
+            r = requests.get(url, params=params, timeout=5)
+            data = r.json()
+            if data and isinstance(data, list) and len(data) > 0:
+                candle_open_ts = data[0][0] // 1000  # ms → s
+                open_price = float(data[0][1])        # index 1 = open price
+                # Verify the candle matches our window start
+                if abs(candle_open_ts - start_ts) <= 60:
+                    return open_price
+        except Exception as e:
+            logger.debug("Kline fetch error for %s: %s", asset, e)
+        return 0.0
 
     GAMMA_API = "https://gamma-api.polymarket.com"
 
