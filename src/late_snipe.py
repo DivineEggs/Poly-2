@@ -224,15 +224,25 @@ class LateSnipeEngine:
                 continue
 
             tokens = max(self.snipe_config.min_shares, 5.0)
-            bid_price = round(max(ask_price - self.snipe_config.maker_bid_offset, 0.01), 2)
             entry_num = (existing.get("entries_placed", 0) if existing else 0) + 1
-            cost = bid_price * tokens
+            taker_thresh = getattr(self.snipe_config, 'taker_seconds_remaining', 6)
+            is_taker = time_remaining <= taker_thresh
+
+            # Last entry: taker at ask (guaranteed fill)
+            # Earlier entries: maker bid at ask-1c
+            if is_taker:
+                order_price = ask_price  # hit the ask
+            else:
+                order_price = round(max(ask_price - self.snipe_config.maker_bid_offset, 0.01), 2)
+
+            cost = order_price * tokens
+            order_type = "TAKER" if is_taker else "MAKER"
 
             logger.info(
-                "🎯 SNIPE ENTRY #%d: %s %s %s | %.1fs left | "
-                "ask=%.0f¢ bid=%.0f¢ | %.0f shares ($%.2f)",
-                entry_num, window.asset, window.timeframe, buy_side,
-                time_remaining, ask_price * 100, bid_price * 100,
+                "🎯 SNIPE #%d [%s]: %s %s %s | %.1fs left | "
+                "ask=%.0f¢ order=%.0f¢ | %.0f shares ($%.2f)",
+                entry_num, order_type, window.asset, window.timeframe, buy_side,
+                time_remaining, ask_price * 100, order_price * 100,
                 tokens, cost,
             )
 
@@ -241,7 +251,7 @@ class LateSnipeEngine:
                 window=window,
                 buy_side=buy_side,
                 token_id=token_id,
-                bid_price=bid_price,
+                bid_price=order_price,
                 ask_price=ask_price,
                 probability=probability,
                 tokens=tokens,

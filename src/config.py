@@ -112,6 +112,7 @@ class SnipeConfig:
     maker_bid_offset: float = 0.01
     min_edge: float = 0.01
     entry_times: tuple = (15, 10, 6)
+    taker_seconds_remaining: int = 6   # last entry uses taker (guaranteed fill)
     min_shares: float = 5.0
     max_concurrent: int = 2
     min_seconds_remaining: int = 3
