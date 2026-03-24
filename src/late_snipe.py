@@ -173,7 +173,7 @@ class LateSnipeEngine:
         logger.info("Snipe candidate %s %s: ask=%.0f¢ depth=%.1f P=%.0f%%",
                     key, buy_side, ask_price * 100, depth, probability * 100)
 
-        return buy_side, token_id, ask_price, probability, pct_move, tokens_needed
+        return buy_side, token_id, ask_price, probability, pct_move, min_shares
 
     async def check_opportunities(self):
         """
