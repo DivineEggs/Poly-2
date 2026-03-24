@@ -236,7 +236,10 @@ class TraderV2:
                 self.window_tracker.tick(prices)
 
                 # Late snipe: buy near-certain outcomes in final 30s
-                await self.snipe_engine.check_opportunities()
+                try:
+                    await self.snipe_engine.check_opportunities()
+                except Exception as e:
+                    logger.error("Snipe engine error: %s", e, exc_info=True)
 
                 # Shield check (every iteration — speed matters)
                 self._run_shield_checks()

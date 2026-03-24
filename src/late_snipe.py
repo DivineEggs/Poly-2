@@ -51,7 +51,8 @@ class SnipeConfig:
     # Incremental entry times (seconds remaining) — fires a new limit order at each threshold
     # if conditions still hold. All orders are limit bids (maker).
     entry_times: tuple = (15, 10, 6)      # seconds remaining triggers
-    entry_size_dollars: float = 3.0       # $ per entry
+    min_shares: float = 5.0               # polymarket minimum order size (shares per entry)
+    taker_seconds_remaining: int = 6      # last entry uses taker (guaranteed fill)
     max_concurrent: int = 2               # max simultaneous windows being sniped
     min_seconds_remaining: int = 3        # don't enter with < 3s left (won't fill)
 
@@ -92,10 +93,10 @@ class LateSnipeEngine:
             "avg_probability": 0.0,
         }
         
-        logger.info("🎯 Late snipe engine initialized | entries at %s s | min=%.0f¢ | $%.0f/entry",
+        logger.info("🎯 Late snipe engine initialized | entries at %s s | min=%.0f¢ | %.0f shares/entry",
                      self.snipe_config.entry_times,
                      self.snipe_config.min_buy_price * 100,
-                     self.snipe_config.entry_size_dollars)
+                     self.snipe_config.min_shares)
 
     def _check_conditions(self, window, time_remaining: float):
         """
@@ -156,12 +157,12 @@ class LateSnipeEngine:
             return None
 
         buy_side, token_id, ask_price = best
-        tokens_needed = self.snipe_config.order_size_dollars / ask_price
+        min_shares = getattr(self.snipe_config, 'min_shares', 5.0)
 
         # Check depth
         book = fetch_order_book(token_id)
         depth = book.asks.depth_at_price(ask_price + 0.02, side="ask") if book else 0
-        if depth < tokens_needed * 0.5:
+        if depth < min_shares * 0.5:
             logger.info("Snipe skip %s %s: thin book %.1f shares", key, buy_side, depth)
             return None
 
