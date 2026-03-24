@@ -73,7 +73,7 @@ snipe:
   max_buy_price: 0.99
   maker_bid_offset: 0.01    # bid 1c below ask (limit/maker order)
   min_edge: 0.01
-  entry_times: [15, 10, 6]  # fire entries at these seconds remaining
+  entry_times: [17, 11, 6]  # fire entries at these seconds remaining
   min_shares: 5             # polymarket minimum order size
   max_concurrent: 2
   min_seconds_remaining: 3
