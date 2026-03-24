@@ -69,7 +69,7 @@ arb:
 # Late snipe — incremental limit buys in final seconds
 snipe:
   enabled: true
-  min_buy_price: 0.82       # only snipe when token is 82c+
+  min_buy_price: 0.79       # only snipe when token is 79c+
   min_dollar_move: 50       # BTC/ETH/SOL must be $50+ from round start price
   max_buy_price: 0.99
   maker_bid_offset: 0.01    # bid 1c below ask (limit/maker order)

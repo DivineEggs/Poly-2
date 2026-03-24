@@ -10,8 +10,12 @@ Run on Mac:
 import json
 import os
 import subprocess
+import sys
 import time
 from datetime import datetime, timezone
+
+# Force unbuffered output so logs appear immediately
+sys.stdout.reconfigure(line_buffering=True)
 
 WALLET       = "0xC97Afd8dD13F6b0B99a33eAcE5C8983E5e84A1f1"
 TELEGRAM_ID  = "8203650754"
@@ -34,7 +38,11 @@ def save_state(state):
 def fetch_trades():
     import urllib.request
     try:
-        with urllib.request.urlopen(API_URL, timeout=10) as r:
+        req = urllib.request.Request(
+            API_URL,
+            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
             return json.loads(r.read())
     except Exception as e:
         print(f"[{ts()}] Fetch error: {e}")
