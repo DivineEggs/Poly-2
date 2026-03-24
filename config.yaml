@@ -69,7 +69,7 @@ arb:
 # Late snipe — incremental limit buys in final seconds
 snipe:
   enabled: true
-  min_buy_price: 0.77       # only snipe when token is 77c+
+  min_buy_price: 0.82       # only snipe when token is 82c+
   max_buy_price: 0.99
   maker_bid_offset: 0.01    # bid 1c below ask (limit/maker order)
   min_edge: 0.01
