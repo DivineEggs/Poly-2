@@ -100,6 +100,7 @@ class WindowTracker:
         self.lookback = lookback_windows
         self.lookahead = lookahead_windows
         self._start_prices_captured: set[str] = set()
+        self._kline_attempted: set[str] = set()  # avoid repeated kline fetches
         self._log_file = None
 
         # Filter to only configured timeframes and assets
@@ -201,16 +202,9 @@ class WindowTracker:
                 })
 
             elif time_since_start > 5 and window.start_price <= 0:
-                # Bot started mid-round — fetch actual open price from Binance klines
-                open_price = self._fetch_candle_open(window.asset, window.start_ts)
-                if open_price > 0:
-                    window.start_price = open_price
-                    self._start_prices_captured.add(key)
-                    logger.info("Kline start price: %s %s $%.2f (round started %.0fs ago)",
-                                window.asset, window.timeframe, open_price, time_since_start)
-                else:
-                    # Kline unavailable — skip this window for $50 filter
-                    logger.debug("Kline unavailable for %s, skipping start price", key)
+                # Bot started mid-round — kline fetch handled in scan() to avoid blocking
+                # tick() is called every 100ms, we must not do HTTP here
+                pass
 
     BINANCE_SYMBOL_MAP = {"BTC": "BTCUSDT", "ETH": "ETHUSDT", "SOL": "SOLUSDT"}
 
@@ -304,6 +298,30 @@ class WindowTracker:
                 logger.warning("Error fetching market data for %s: %s", key, e)
 
             await asyncio.sleep(0.15)  # Rate limit
+
+        # Fetch kline start prices for windows that are mid-round (bot started late)
+        # Done here (scan, every 30s) not in tick() to avoid blocking the async loop
+        for key, window in self.windows.items():
+            if key in self._start_prices_captured:
+                continue
+            if key in self._kline_attempted:
+                continue
+            if window.is_expired:
+                continue
+            now = time.time()
+            time_since_start = now - window.start_ts
+            if time_since_start <= 5:
+                continue  # tick() will handle this one
+            self._kline_attempted.add(key)
+            try:
+                open_price = self._fetch_candle_open(window.asset, window.start_ts)
+                if open_price > 0:
+                    window.start_price = open_price
+                    self._start_prices_captured.add(key)
+                    logger.info("Kline start price: %s %s $%.2f (%.0fs into round)",
+                                window.asset, window.timeframe, open_price, time_since_start)
+            except Exception as e:
+                logger.debug("Kline fetch error %s: %s", key, e)
 
     def get_active_windows(self) -> list[Window]:
         return [w for w in self.windows.values() if w.is_active]
