@@ -227,6 +227,14 @@ class TraderV2:
                 if self.config.trading.spread_capture_enabled and can_trade:
                     await self._evaluate_markets()
 
+                # Update start prices for all windows
+                prices = {
+                    "BTC": self.price_feed.get_price("BTC"),
+                    "ETH": self.price_feed.get_price("ETH"),
+                    "SOL": self.price_feed.get_price("SOL"),
+                }
+                self.window_tracker.tick(prices)
+
                 # Late snipe: buy near-certain outcomes in final 30s
                 await self.snipe_engine.check_opportunities()
 
