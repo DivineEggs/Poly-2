@@ -103,8 +103,9 @@ class LateSnipeEngine:
     def _check_conditions(self, window, time_remaining: float):
         """
         Check all snipe entry conditions for a window.
+        Strategy: check both token order books, buy whichever side is >= min_buy_price.
+        Token price IS the signal — no start_price direction guessing needed.
         Returns (buy_side, token_id, ask_price, probability, pct_move, tokens) or None.
-        Logs the reason for every skip.
         """
         key = f"{window.asset} {window.timeframe}"
 
@@ -112,65 +113,51 @@ class LateSnipeEngine:
             logger.debug("Snipe skip %s: no token IDs", key)
             return None
 
-        start_price = window.start_price
-        if start_price <= 0:
-            logger.debug("Snipe skip %s: start_price not captured yet", key)
+        # Check both sides — buy whichever is at min_buy_price or higher
+        candidates = [
+            ("Up", window.up_token_id),
+            ("Down", window.down_token_id),
+        ]
+
+        best = None
+        for side, token_id in candidates:
+            try:
+                book = fetch_order_book(token_id)
+                if not book or book.asks.best_price <= 0:
+                    continue
+                ask_price = book.asks.best_price
+                if ask_price < self.snipe_config.min_buy_price:
+                    logger.debug("Snipe skip %s %s: ask %.0f¢ < min %.0f¢",
+                                 key, side, ask_price * 100, self.snipe_config.min_buy_price * 100)
+                    continue
+                if ask_price > self.snipe_config.max_buy_price:
+                    continue
+                # Pick the highest-priced side (most certain outcome)
+                if best is None or ask_price > best[2]:
+                    best = (side, token_id, ask_price)
+            except Exception as e:
+                logger.debug("Snipe book error %s %s: %s", key, side, e)
+
+        if best is None:
+            logger.debug("Snipe skip %s: no side >= %.0f¢", key, self.snipe_config.min_buy_price * 100)
             return None
 
-        current_price = self.price_feed.get_price(window.asset)
-        if current_price <= 0:
-            logger.debug("Snipe skip %s: no Binance price", key)
-            return None
-
-        pct_move = ((current_price - start_price) / start_price) * 100
-        dollar_move = abs(current_price - start_price)
-
-        if abs(pct_move) < self.snipe_config.min_move_pct:
-            logger.debug("Snipe skip %s: move %.2f%% < min %.2f%%",
-                         key, abs(pct_move), self.snipe_config.min_move_pct)
-            return None
-
-        min_dollar = getattr(self.snipe_config, 'min_dollar_move', 0)
-        if min_dollar > 0 and dollar_move < min_dollar:
-            logger.info("Snipe skip %s: $%.0f move < $%.0f min (start=$%.0f now=$%.0f)",
-                        key, dollar_move, min_dollar, start_price, current_price)
-            return None
-
-        probability = self._calc_probability(
-            pct_move=abs(pct_move),
-            time_remaining=time_remaining,
-            asset=window.asset,
-        )
-
-        buy_side = "Up" if pct_move > 0 else "Down"
-        token_id = window.up_token_id if buy_side == "Up" else window.down_token_id
-
-        book = fetch_order_book(token_id)
-        if not book or book.asks.best_price <= 0:
-            logger.debug("Snipe skip %s: can't fetch order book", key)
-            return None
-
-        ask_price = book.asks.best_price
-
-        if ask_price > self.snipe_config.max_buy_price:
-            logger.debug("Snipe skip %s: ask %.2f > max %.2f", key, ask_price, self.snipe_config.max_buy_price)
-            return None
-        if ask_price < self.snipe_config.min_buy_price:
-            logger.info("Snipe skip %s %s: ask %.0f¢ below min %.0f¢ (move=$%.0f, P=%.0f%%)",
-                        key, buy_side, ask_price * 100, self.snipe_config.min_buy_price * 100,
-                        dollar_move, probability * 100)
-            return None
-
-        edge = probability - ask_price
-        if edge < self.snipe_config.min_edge:
-            logger.debug("Snipe skip %s: edge %.3f < min %.3f", key, edge, self.snipe_config.min_edge)
-            return None
-
-        depth = book.asks.depth_at_price(ask_price + 0.02, side="ask")
+        buy_side, token_id, ask_price = best
         tokens_needed = self.snipe_config.order_size_dollars / ask_price
+
+        # Check depth
+        book = fetch_order_book(token_id)
+        depth = book.asks.depth_at_price(ask_price + 0.02, side="ask") if book else 0
         if depth < tokens_needed * 0.5:
-            logger.info("Snipe skip %s: thin book depth %.1f < %.1f needed", key, depth, tokens_needed * 0.5)
+            logger.info("Snipe skip %s %s: thin book %.1f shares", key, buy_side, depth)
             return None
+
+        # Probability = ask price itself (market knows best at this point)
+        probability = min(ask_price + 0.02, 0.99)
+        pct_move = 0.0  # not used for direction anymore
+
+        logger.info("Snipe candidate %s %s: ask=%.0f¢ depth=%.1f P=%.0f%%",
+                    key, buy_side, ask_price * 100, depth, probability * 100)
 
         return buy_side, token_id, ask_price, probability, pct_move, tokens_needed
 
