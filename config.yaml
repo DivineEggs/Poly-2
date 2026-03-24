@@ -71,11 +71,11 @@ snipe:
   enabled: true
   max_seconds_remaining: 15
   min_seconds_remaining: 3
-  min_move_pct: 0.07        # ~$50 on BTC at $70k
-  min_dollar_move: 50       # BTC must be $50+ from start price
+  min_move_pct: 0.01        # minimal % filter — token price is the real signal
+  min_dollar_move: 0        # disabled — 80c token already implies big move
   min_edge: 0.01
   max_buy_price: 0.99
-  min_buy_price: 0.80
+  min_buy_price: 0.75
   order_size_dollars: 5.0
   max_concurrent: 2
   cooldown_per_window: 10
