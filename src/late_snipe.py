@@ -50,9 +50,12 @@ class SnipeConfig:
     min_edge: float = 0.01                # token probability must exceed price by this much
     # Incremental entry times (seconds remaining) — fires a new limit order at each threshold
     # if conditions still hold. All orders are limit bids (maker).
-    entry_times: tuple = (15, 10, 6)      # seconds remaining triggers
+    entry_times: tuple = (15, 10, 6)      # legacy — unused, kept for config compat
     min_shares: float = 5.0               # polymarket minimum order size (shares per entry)
-    taker_seconds_remaining: int = 6      # last entry uses taker (guaranteed fill)
+    taker_seconds_remaining: int = 6      # at or below this → taker order (guaranteed fill)
+    snipe_window_seconds: int = 17        # start scanning this many seconds before round end
+    cooldown_seconds: float = 4.0         # minimum seconds between entries on same window
+    max_entries_per_window: int = 3       # max orders per window (prevents over-exposure)
     max_concurrent: int = 2               # max simultaneous windows being sniped
     min_seconds_remaining: int = 3        # don't enter with < 3s left (won't fill)
 
@@ -196,7 +199,10 @@ class LateSnipeEngine:
         self._resolve_expired()
 
         active_windows = self.window_tracker.get_active_windows()
-        entry_times = sorted(self.snipe_config.entry_times, reverse=True)  # [15, 10, 6]
+        snipe_window = self.snipe_config.snipe_window_seconds
+        cooldown = self.snipe_config.cooldown_seconds
+        max_entries = self.snipe_config.max_entries_per_window
+        taker_thresh = self.snipe_config.taker_seconds_remaining
 
         for window in active_windows:
             time_remaining = window.end_ts - now
@@ -204,37 +210,33 @@ class LateSnipeEngine:
             # Outside snipe window entirely
             if time_remaining < self.snipe_config.min_seconds_remaining:
                 continue
-            if time_remaining > max(entry_times):
+            if time_remaining > snipe_window:
                 continue
 
             existing = self._active_snipes.get(window.key)
 
-            # Determine which entry index we're at
-            entry_idx = sum(1 for t in entry_times if time_remaining <= t) - 1
-            if entry_idx < 0:
-                continue
-
             if existing:
-                # Already entered — check if we need next incremental entry
+                # Already entered — check cooldown and max entries
                 entries_placed = existing.get("entries_placed", 0)
-                if entries_placed > entry_idx:
-                    continue  # Already placed this entry or beyond
-                if entries_placed >= len(entry_times):
-                    continue  # All entries placed
+                if entries_placed >= max_entries:
+                    continue  # Hit max entries for this window
+                last_entry_time = existing.get("last_entry_time", 0)
+                if now - last_entry_time < cooldown:
+                    continue  # Too soon since last entry
+                # Must stay on same side
             else:
                 # First entry — check concurrent limit
-                active_count = len(self._active_snipes)
-                if active_count >= self.snipe_config.max_concurrent:
+                if len(self._active_snipes) >= self.snipe_config.max_concurrent:
                     continue
 
-            # Re-check conditions for this entry
+            # Check conditions
             result = self._check_conditions(window, time_remaining)
             if not result:
                 continue
 
             buy_side, token_id, ask_price, probability, pct_move, _ = result
 
-            # If we already have a position, must be same side
+            # If already in position, must be same side
             if existing and buy_side != existing.get("side"):
                 logger.info("⏭ Incremental skip %s: direction flipped %s→%s",
                             window.key, existing["side"], buy_side)
@@ -242,13 +244,11 @@ class LateSnipeEngine:
 
             tokens = max(self.snipe_config.min_shares, 5.0)
             entry_num = (existing.get("entries_placed", 0) if existing else 0) + 1
-            taker_thresh = getattr(self.snipe_config, 'taker_seconds_remaining', 6)
             is_taker = time_remaining <= taker_thresh
 
-            # Last entry: taker at ask (guaranteed fill)
-            # Earlier entries: maker bid at ask-1c
+            # Taker at ≤6s (guaranteed fill), maker earlier
             if is_taker:
-                order_price = ask_price  # hit the ask
+                order_price = ask_price
             else:
                 order_price = round(max(ask_price - self.snipe_config.maker_bid_offset, 0.01), 2)
 
@@ -357,6 +357,7 @@ class LateSnipeEngine:
                 "token_id": token_id,
                 "window_end": window.end_ts,
                 "entries_placed": 1,
+                "last_entry_time": now,
                 "orders": [{"order_id": order_id, "price": bid_price, "tokens": tokens, "cost": cost}],
                 "total_tokens": tokens,
                 "total_cost": cost,
@@ -367,6 +368,7 @@ class LateSnipeEngine:
         else:
             snipe = self._active_snipes[window.key]
             snipe["entries_placed"] += 1
+            snipe["last_entry_time"] = now
             snipe["orders"].append({"order_id": order_id, "price": bid_price, "tokens": tokens, "cost": cost})
             snipe["total_tokens"] += tokens
             snipe["total_cost"] += cost
