@@ -69,11 +69,11 @@ arb:
 # Late snipe — incremental limit buys in final seconds
 snipe:
   enabled: true
-  min_buy_price: 0.88       # only snipe when token is 88c+
+  min_buy_price: 0.77       # only snipe when token is 77c+
   max_buy_price: 0.99
   maker_bid_offset: 0.01    # bid 1c below ask (limit/maker order)
   min_edge: 0.01
   entry_times: [15, 10, 6]  # fire entries at these seconds remaining
-  entry_size_dollars: 3.0   # $ per entry (max $9 total per window)
+  min_shares: 5             # polymarket minimum order size
   max_concurrent: 2
   min_seconds_remaining: 3

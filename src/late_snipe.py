@@ -223,16 +223,17 @@ class LateSnipeEngine:
                             window.key, existing["side"], buy_side)
                 continue
 
-            tokens = self.snipe_config.entry_size_dollars / ask_price
+            tokens = max(self.snipe_config.min_shares, 5.0)
             bid_price = round(max(ask_price - self.snipe_config.maker_bid_offset, 0.01), 2)
             entry_num = (existing.get("entries_placed", 0) if existing else 0) + 1
+            cost = bid_price * tokens
 
             logger.info(
                 "🎯 SNIPE ENTRY #%d: %s %s %s | %.1fs left | "
-                "ask=%.0f¢ bid=%.0f¢ | $%.2f",
+                "ask=%.0f¢ bid=%.0f¢ | %.0f shares ($%.2f)",
                 entry_num, window.asset, window.timeframe, buy_side,
                 time_remaining, ask_price * 100, bid_price * 100,
-                self.snipe_config.entry_size_dollars,
+                tokens, cost,
             )
 
             self.stats["opportunities"] += 1
