@@ -63,7 +63,7 @@ class AutoRedeemer:
         self._account = None
         self._proxy_wallet = None
         self._last_redeem = 0
-        self._redeem_interval = 60
+        self._redeem_interval = 15
         self._initialized = False
 
     def _init(self):
