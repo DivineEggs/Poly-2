@@ -66,16 +66,14 @@ arb:
   sell_discount_from_fair: 0.02
   sell_timeout_seconds: 45
 
-# Late snipe — buy near-certain outcomes in final 15s
+# Late snipe — incremental limit buys in final seconds
 snipe:
   enabled: true
-  max_seconds_remaining: 15
-  min_seconds_remaining: 3
-  min_move_pct: 0.01        # minimal % filter — token price is the real signal
-  min_dollar_move: 0        # disabled — 80c token already implies big move
-  min_edge: 0.01
+  min_buy_price: 0.88       # only snipe when token is 88c+
   max_buy_price: 0.99
-  min_buy_price: 0.75
-  order_size_dollars: 5.0
+  maker_bid_offset: 0.01    # bid 1c below ask (limit/maker order)
+  min_edge: 0.01
+  entry_times: [15, 10, 6]  # fire entries at these seconds remaining
+  entry_size_dollars: 3.0   # $ per entry (max $9 total per window)
   max_concurrent: 2
-  cooldown_per_window: 10
+  min_seconds_remaining: 3

@@ -107,16 +107,14 @@ class ArbConfig:
 @dataclass
 class SnipeConfig:
     enabled: bool = True
-    max_seconds_remaining: int = 30
-    min_seconds_remaining: int = 5
-    min_move_pct: float = 0.07
-    min_dollar_move: float = 50.0
-    min_edge: float = 0.01
+    min_buy_price: float = 0.88
     max_buy_price: float = 0.99
-    min_buy_price: float = 0.90
-    order_size_dollars: float = 5.0
+    maker_bid_offset: float = 0.01
+    min_edge: float = 0.01
+    entry_times: tuple = (15, 10, 6)
+    entry_size_dollars: float = 3.0
     max_concurrent: int = 2
-    cooldown_per_window: float = 10.0
+    min_seconds_remaining: int = 3
 
 
 @dataclass
