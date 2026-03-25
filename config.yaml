@@ -83,7 +83,7 @@ snipe:
   entry_times: [17, 11, 6]  # fire entries at these seconds remaining
   min_shares: 5             # polymarket minimum order size
   max_concurrent: 2
-  max_entries_per_window: 2   # max 2 entries per round (limits exposure)
+  max_entries_per_window: 3   # max 3 entries per round
   cooldown_seconds: 4.0       # min seconds between entries on same window
   snipe_window_seconds: 17    # start scanning 17s before round end
   taker_seconds_remaining: 6  # use taker at <=6s remaining
