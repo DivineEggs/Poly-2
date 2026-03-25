@@ -62,10 +62,10 @@ class SnipeConfig:
     min_buy_price_btc: float = 0.85       # BTC: 85c minimum
     min_buy_price_eth: float = 0.79       # ETH: 79c during golden hours
     min_buy_price_eth_afterhours: float = 0.88  # ETH: 88c after hours
-    # Per-asset move filters
-    min_dollar_move: float = 50.0
-    dollar_move_btc: float = 50.0
-    dollar_move_eth: float = 50.0
+    # Per-asset move filters (0 = disabled; price floor handles filtering)
+    min_dollar_move: float = 0.0
+    dollar_move_btc: float = 0.0
+    dollar_move_eth: float = 0.0
     dollar_move_sol: float = 0.0
     # Asset controls
     disabled_assets: list = field(default_factory=lambda: ["SOL"])

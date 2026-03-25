@@ -72,10 +72,10 @@ snipe:
   min_buy_price_btc: 0.85              # BTC: 85c minimum
   min_buy_price_eth: 0.79              # ETH: 79c during golden hours
   min_buy_price_eth_afterhours: 0.88   # ETH: 88c after 8:30PM ET (after hours)
-  min_dollar_move: 50       # fallback default (overridden per asset below)
-  dollar_move_btc: 50       # BTC: $50 (85c+ min does the filtering now)
-  dollar_move_eth: 50       # ETH: $50 (~1.4%) — working well
-  dollar_move_sol: 0        # SOL: disabled (unreliable)
+  min_dollar_move: 0        # disabled — price floor handles filtering
+  dollar_move_btc: 0        # BTC: min price 85c is the filter
+  dollar_move_eth: 0        # ETH: min price 79c/88c is the filter
+  dollar_move_sol: 0        # SOL: disabled entirely
   disabled_assets: ["SOL"]  # SOL disabled entirely
   trading_start_hour_et: 6    # Start at 6:00 AM ET
   trading_end_hour_et: 20     # Stop at 8:30 PM ET
