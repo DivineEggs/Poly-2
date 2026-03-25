@@ -46,20 +46,32 @@ logger = get_logger("late_snipe")
 class SnipeConfig:
     """Late snipe configuration."""
     enabled: bool = True
-    min_buy_price: float = 0.88           # Never buy below 88¢
-    max_buy_price: float = 0.99           # Never buy above 99¢
-    maker_bid_offset: float = 0.01        # Bid this much below ask (limit order)
-    min_edge: float = 0.01                # token probability must exceed price by this much
-    # Incremental entry times (seconds remaining) — fires a new limit order at each threshold
-    # if conditions still hold. All orders are limit bids (maker).
-    entry_times: tuple = (15, 10, 6)      # legacy — unused, kept for config compat
-    min_shares: float = 5.0               # polymarket minimum order size (shares per entry)
-    taker_seconds_remaining: int = 6      # at or below this → taker order (guaranteed fill)
-    snipe_window_seconds: int = 17        # start scanning this many seconds before round end
-    cooldown_seconds: float = 4.0         # minimum seconds between entries on same window
-    max_entries_per_window: int = 3       # max orders per window (prevents over-exposure)
-    max_concurrent: int = 2               # max simultaneous windows being sniped
-    min_seconds_remaining: int = 3        # don't enter with < 3s left (won't fill)
+    min_buy_price: float = 0.79           # global fallback min price
+    max_buy_price: float = 0.99
+    maker_bid_offset: float = 0.01
+    min_edge: float = 0.01
+    entry_times: tuple = (15, 10, 6)      # legacy — unused
+    min_shares: float = 5.0
+    taker_seconds_remaining: int = 6
+    snipe_window_seconds: int = 17
+    cooldown_seconds: float = 4.0
+    max_entries_per_window: int = 3
+    max_concurrent: int = 2
+    min_seconds_remaining: int = 3
+    # Per-asset min buy prices
+    min_buy_price_btc: float = 0.85       # BTC: 85c minimum
+    min_buy_price_eth: float = 0.79       # ETH: 79c during golden hours
+    min_buy_price_eth_afterhours: float = 0.88  # ETH: 88c after hours
+    # Per-asset move filters
+    min_dollar_move: float = 50.0
+    dollar_move_btc: float = 50.0
+    dollar_move_eth: float = 50.0
+    dollar_move_sol: float = 0.0
+    # Asset controls
+    disabled_assets: list = field(default_factory=lambda: ["SOL"])
+    trading_start_hour_et: int = 6
+    trading_end_hour_et: int = 20
+    trading_end_minute_et: int = 30
 
 
 class LateSnipeEngine:
