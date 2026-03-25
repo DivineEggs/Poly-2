@@ -211,6 +211,13 @@ class TraderV2:
                         if bal < self.config.trading.min_usdc_balance:
                             logger.warning("Low USDC balance: $%.2f (min: $%.2f)",
                                            bal, self.config.trading.min_usdc_balance)
+                        # Write balance to file for dashboard
+                        try:
+                            balance_path = os.path.join(DATA_DIR, "balance.json")
+                            with open(balance_path, "w") as f:
+                                json.dump({"balance": round(bal, 2), "ts": int(now)}, f)
+                        except Exception:
+                            pass
                     self._last_balance_check = now
 
                 # One-trade-at-a-time check
