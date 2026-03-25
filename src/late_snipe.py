@@ -209,6 +209,22 @@ class LateSnipeEngine:
         if not self.snipe_config.enabled:
             return
 
+        # Time-of-day filter (ET timezone)
+        try:
+            from datetime import datetime, timezone, timedelta
+            ET = timezone(timedelta(hours=-4))  # EDT (UTC-4); adjust to -5 in winter
+            et_now = datetime.now(ET)
+            start_h = getattr(self.snipe_config, 'trading_start_hour_et', 6)
+            end_h   = getattr(self.snipe_config, 'trading_end_hour_et', 20)
+            end_m   = getattr(self.snipe_config, 'trading_end_minute_et', 30)
+            et_minutes = et_now.hour * 60 + et_now.minute
+            window_open = et_minutes >= start_h * 60
+            window_close = et_minutes >= end_h * 60 + end_m
+            if not window_open or window_close:
+                return
+        except Exception:
+            pass  # If time check fails, don't block trading
+
         now = time.time()
         self._resolve_expired()
 

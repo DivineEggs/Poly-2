@@ -121,6 +121,9 @@ class SnipeConfig:
     min_buy_price_btc: float = 0.85    # BTC: 85c minimum
     min_buy_price_eth: float = 0.79    # ETH: 79c (leave alone for now)
     disabled_assets: list = field(default_factory=lambda: ["SOL"])  # SOL disabled
+    trading_start_hour_et: int = 6     # Start trading at 6:00 AM ET
+    trading_end_hour_et: int = 20      # Stop trading at 8:00 PM ET (20:30 handled via minutes)
+    trading_end_minute_et: int = 30    # Stop at 8:30 PM ET
     max_concurrent: int = 2
     min_seconds_remaining: int = 3
 

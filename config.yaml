@@ -77,6 +77,9 @@ snipe:
   dollar_move_eth: 50       # ETH: $50 (~1.4%) — working well
   dollar_move_sol: 0        # SOL: disabled (unreliable)
   disabled_assets: ["SOL"]  # SOL disabled entirely
+  trading_start_hour_et: 6    # Start at 6:00 AM ET
+  trading_end_hour_et: 20     # Stop at 8:30 PM ET
+  trading_end_minute_et: 30
   max_buy_price: 0.99
   maker_bid_offset: 0.01    # bid 1c below ask (limit/maker order)
   min_edge: 0.01
