@@ -69,7 +69,9 @@ arb:
 # Late snipe — incremental limit buys in final seconds
 snipe:
   enabled: true
-  min_buy_price: 0.85       # only snipe when token is 85c+
+  min_buy_price: 0.79       # global fallback
+  min_buy_price_btc: 0.85   # BTC: 85c minimum
+  min_buy_price_eth: 0.79   # ETH: 79c (leave alone for now)
   min_dollar_move: 50       # fallback default (overridden per asset below)
   dollar_move_btc: 50       # BTC: $50 (85c+ min does the filtering now)
   dollar_move_eth: 50       # ETH: $50 (~1.4%) — working well

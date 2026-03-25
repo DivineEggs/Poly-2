@@ -145,6 +145,11 @@ class LateSnipeEngine:
             ("Down", window.down_token_id),
         ]
 
+        # Per-asset min buy price
+        price_key = f"min_buy_price_{asset_upper.lower()}"
+        min_price = getattr(self.snipe_config, price_key,
+                    getattr(self.snipe_config, 'min_buy_price', 0.79))
+
         best = None
         for side, token_id in candidates:
             try:
@@ -152,9 +157,9 @@ class LateSnipeEngine:
                 if not book or book.asks.best_price <= 0:
                     continue
                 ask_price = book.asks.best_price
-                if ask_price < self.snipe_config.min_buy_price:
+                if ask_price < min_price:
                     logger.debug("Snipe skip %s %s: ask %.0f¢ < min %.0f¢",
-                                 key, side, ask_price * 100, self.snipe_config.min_buy_price * 100)
+                                 key, side, ask_price * 100, min_price * 100)
                     continue
                 if ask_price > self.snipe_config.max_buy_price:
                     continue

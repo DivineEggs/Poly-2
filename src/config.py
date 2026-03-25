@@ -107,7 +107,7 @@ class ArbConfig:
 @dataclass
 class SnipeConfig:
     enabled: bool = True
-    min_buy_price: float = 0.88
+    min_buy_price: float = 0.79        # global fallback (overridden per asset below)
     max_buy_price: float = 0.99
     maker_bid_offset: float = 0.01
     min_edge: float = 0.01
@@ -115,9 +115,11 @@ class SnipeConfig:
     taker_seconds_remaining: int = 6
     min_shares: float = 5.0
     min_dollar_move: float = 50.0      # default fallback (overridden by per-asset below)
-    dollar_move_btc: float = 150.0     # BTC: $150 = ~0.21% move
+    dollar_move_btc: float = 50.0      # BTC: $50
     dollar_move_eth: float = 50.0      # ETH: $50 = ~1.4% move (working well)
-    dollar_move_sol: float = 0.0       # SOL: disabled (unreliable, bad $50 filter)
+    dollar_move_sol: float = 0.0       # SOL: disabled
+    min_buy_price_btc: float = 0.85    # BTC: 85c minimum
+    min_buy_price_eth: float = 0.79    # ETH: 79c (leave alone for now)
     disabled_assets: list = field(default_factory=lambda: ["SOL"])  # SOL disabled
     max_concurrent: int = 2
     min_seconds_remaining: int = 3
