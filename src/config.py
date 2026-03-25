@@ -118,8 +118,9 @@ class SnipeConfig:
     dollar_move_btc: float = 50.0      # BTC: $50
     dollar_move_eth: float = 50.0      # ETH: $50 = ~1.4% move (working well)
     dollar_move_sol: float = 0.0       # SOL: disabled
-    min_buy_price_btc: float = 0.85    # BTC: 85c minimum
-    min_buy_price_eth: float = 0.79    # ETH: 79c (leave alone for now)
+    min_buy_price_btc: float = 0.85           # BTC: 85c minimum
+    min_buy_price_eth: float = 0.79           # ETH: 79c during golden hours
+    min_buy_price_eth_afterhours: float = 0.88 # ETH: 88c after 8:30PM ET
     disabled_assets: list = field(default_factory=lambda: ["SOL"])  # SOL disabled
     trading_start_hour_et: int = 6     # Start trading at 6:00 AM ET
     trading_end_hour_et: int = 20      # Stop trading at 8:00 PM ET (20:30 handled via minutes)

@@ -73,13 +73,21 @@ class LateSnipeEngine:
         self.clob = clob_manager
         self.price_feed = price_feed
         self.window_tracker = window_tracker
-        
+
         # Load snipe config from main config or use defaults
         self.snipe_config = SnipeConfig()
         if hasattr(config, 'snipe'):
             for attr in vars(self.snipe_config):
                 if hasattr(config.snipe, attr):
                     setattr(self.snipe_config, attr, getattr(config.snipe, attr))
+
+        # Trades logger
+        try:
+            from src.trades_logger import TradesLogger
+            self.trades_logger = TradesLogger(clob_manager)
+        except Exception as e:
+            logger.warning("Trades logger disabled: %s", e)
+            self.trades_logger = None
         
         # State
         self._sniped_windows: dict[str, float] = {}  # window_key → last_snipe_time
@@ -121,6 +129,25 @@ class LateSnipeEngine:
             logger.debug("Snipe skip %s: asset disabled", key)
             return None
 
+        # Time of day: BTC only in golden hours; ETH allowed after hours with higher min
+        in_golden = getattr(self, '_in_golden_hours', True)
+        if not in_golden:
+            if asset_upper == "BTC":
+                logger.debug("Snipe skip %s: BTC outside golden hours", key)
+                return None
+            # ETH after hours: use higher min price (88c)
+            # (handled below when setting min_price)
+
+        # Balance check — skip if insufficient USDC
+        try:
+            balance = self.clob.get_usdc_balance()
+            min_balance = getattr(self.config.trading, 'min_usdc_balance', 3.0)
+            if balance < min_balance:
+                logger.warning("Snipe skip %s: low balance $%.2f", key, balance)
+                return None
+        except Exception:
+            pass  # Don't block on balance check failure
+
         move_key = f"dollar_move_{asset_upper.lower()}"
         min_dollar = getattr(self.snipe_config, move_key,
                      getattr(self.snipe_config, 'min_dollar_move', 0))
@@ -145,10 +172,13 @@ class LateSnipeEngine:
             ("Down", window.down_token_id),
         ]
 
-        # Per-asset min buy price
+        # Per-asset min buy price (higher threshold after golden hours for ETH)
         price_key = f"min_buy_price_{asset_upper.lower()}"
         min_price = getattr(self.snipe_config, price_key,
                     getattr(self.snipe_config, 'min_buy_price', 0.79))
+        if not in_golden and asset_upper == "ETH":
+            after_hours_min = getattr(self.snipe_config, 'min_buy_price_eth_afterhours', 0.88)
+            min_price = max(min_price, after_hours_min)
 
         best = None
         for side, token_id in candidates:
@@ -210,6 +240,8 @@ class LateSnipeEngine:
             return
 
         # Time-of-day filter (ET timezone)
+        # ETH trades 24/7 but with higher min price after hours
+        # BTC only trades during 6AM-8:30PM ET
         try:
             from datetime import datetime, timezone, timedelta
             ET = timezone(timedelta(hours=-4))  # EDT (UTC-4); adjust to -5 in winter
@@ -218,15 +250,25 @@ class LateSnipeEngine:
             end_h   = getattr(self.snipe_config, 'trading_end_hour_et', 20)
             end_m   = getattr(self.snipe_config, 'trading_end_minute_et', 30)
             et_minutes = et_now.hour * 60 + et_now.minute
-            window_open = et_minutes >= start_h * 60
-            window_close = et_minutes >= end_h * 60 + end_m
-            if not window_open or window_close:
-                return
+            in_golden = et_minutes >= start_h * 60 and et_minutes < end_h * 60 + end_m
+            self._in_golden_hours = in_golden  # used in _check_conditions
+            # BTC blocked outside golden hours entirely
+            # ETH allowed 24/7 (handled per-window in _check_conditions)
         except Exception:
-            pass  # If time check fails, don't block trading
+            self._in_golden_hours = True  # safe default
 
         now = time.time()
         self._resolve_expired()
+
+        # Check pending trade outcomes
+        if self.trades_logger:
+            try:
+                self.trades_logger.check_pending()
+            except Exception as e:
+                logger.debug("Trades logger check error: %s", e)
+
+        # Cancel stale maker orders where token dropped below min price
+        self._cancel_stale_makers()
 
         active_windows = self.window_tracker.get_active_windows()
         snipe_window = self.snipe_config.snipe_window_seconds
@@ -389,6 +431,19 @@ class LateSnipeEngine:
             logger.info("✅ SNIPE #%d PLACED: %s %s @ %.0f¢ (%.2f tokens) → %s",
                         entry_num, buy_side, window.asset, bid_price * 100, tokens, order_id)
 
+            # Record for W/L tracking
+            if self.trades_logger:
+                self.trades_logger.record_order(
+                    order_id=order_id,
+                    asset=window.asset,
+                    direction=buy_side,
+                    entry_price=bid_price,
+                    shares=tokens,
+                    window_end=window.end_ts,
+                    token_id=token_id,
+                    condition_id=getattr(window, 'condition_id', ''),
+                )
+
         now = time.time()
         cost = bid_price * tokens
 
@@ -420,6 +475,43 @@ class LateSnipeEngine:
 
         self._sniped_windows[window.key] = now
         self.stats["trades"] += 1
+
+    def _cancel_stale_makers(self):
+        """
+        Cancel open maker orders if the token price has dropped below min_buy_price.
+        Prevents filling at a bad price if the market reversed after order placement.
+        """
+        now = time.time()
+        for window_key, snipe in list(self._active_snipes.items()):
+            if snipe.get("window_end", 0) < now:
+                continue  # Window expired, let _resolve_expired handle it
+            orders = snipe.get("orders", [])
+            token_id = snipe.get("token_id", "")
+            asset = snipe.get("asset", "")
+            if not token_id:
+                continue
+            try:
+                book = fetch_order_book(token_id)
+                if not book:
+                    continue
+                current_ask = book.asks.best_price
+                asset_upper = asset.upper()
+                price_key = f"min_buy_price_{asset_upper.lower()}"
+                min_price = getattr(self.snipe_config, price_key,
+                            getattr(self.snipe_config, 'min_buy_price', 0.79))
+                # If token dropped significantly below min, cancel open makers
+                if current_ask < min_price - 0.05:
+                    for order in orders:
+                        oid = order.get("order_id", "")
+                        if oid and not oid.startswith("snipe_paper"):
+                            try:
+                                self.clob.cancel_order(oid)
+                                logger.info("🚫 Cancelled stale maker %s: %s ask=%.0f¢ < min=%.0f¢",
+                                            oid[:8], asset, current_ask * 100, min_price * 100)
+                            except Exception:
+                                pass
+            except Exception:
+                pass
 
     def _resolve_expired(self):
         """
