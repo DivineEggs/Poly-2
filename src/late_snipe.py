@@ -29,7 +29,9 @@ Risks:
   - Requiring significant edge above price
   - High frequency: every 5 min × 3 assets = 36 opportunities/hour
 """
+import json
 import math
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -92,7 +94,12 @@ class LateSnipeEngine:
         # State
         self._sniped_windows: dict[str, float] = {}  # window_key → last_snipe_time
         self._active_snipes: dict[str, dict] = {}     # window_key → snipe info
-        self._bot_start_time = time.time()            # track startup for mid-window safety
+        self._bot_start_time = time.time()
+        self._snipes_persist_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "data", "active_snipes.json"
+        )
+        self._load_persisted_snipes()
         
         # Stats
         self.stats = {
@@ -288,16 +295,10 @@ class LateSnipeEngine:
 
             existing = self._active_snipes.get(window.key)
 
-            # If bot just started and this window was already in progress,
-            # limit to 1 entry to avoid stacking on top of unknown prior orders
-            bot_age = now - self._bot_start_time
-            window_already_active = (window.end_ts - now) < (300 - snipe_window - 5)
-            effective_max = 1 if (bot_age < 60 and window_already_active) else max_entries
-
             if existing:
                 # Already entered — check cooldown and max entries
                 entries_placed = existing.get("entries_placed", 0)
-                if entries_placed >= effective_max:
+                if entries_placed >= max_entries:
                     continue  # Hit max entries for this window
                 last_entry_time = existing.get("last_entry_time", 0)
                 if now - last_entry_time < cooldown:
@@ -480,8 +481,43 @@ class LateSnipeEngine:
             logger.info("📊 Window %s: %d entries, avg=%.0f¢, total=$%.2f",
                         window.key, snipe["entries_placed"], snipe["avg_price"] * 100, snipe["total_cost"])
 
+        # Persist to disk immediately so restarts see correct entry count
+        self._persist_snipes()
+
         self._sniped_windows[window.key] = now
         self.stats["trades"] += 1
+
+    def _load_persisted_snipes(self):
+        """Load active snipes from disk on startup — restores entry counts across restarts."""
+        try:
+            if not os.path.exists(self._snipes_persist_path):
+                return
+            with open(self._snipes_persist_path) as f:
+                data = json.load(f)
+            now = time.time()
+            loaded = 0
+            for key, snipe in data.items():
+                # Skip windows that have already ended
+                if snipe.get("window_end", 0) < now:
+                    continue
+                self._active_snipes[key] = snipe
+                loaded += 1
+            if loaded:
+                logger.info("Restored %d active snipe window(s) from disk", loaded)
+                for key, snipe in self._active_snipes.items():
+                    logger.info("  → %s: %d entries placed, side=%s",
+                                key, snipe.get("entries_placed", 0), snipe.get("side", "?"))
+        except Exception as e:
+            logger.warning("Could not load persisted snipes: %s", e)
+
+    def _persist_snipes(self):
+        """Save current active snipes to disk."""
+        try:
+            os.makedirs(os.path.dirname(self._snipes_persist_path), exist_ok=True)
+            with open(self._snipes_persist_path, "w") as f:
+                json.dump(self._active_snipes, f, indent=2)
+        except Exception as e:
+            logger.debug("Could not persist snipes: %s", e)
 
     def _cancel_stale_makers(self):
         """
@@ -575,7 +611,9 @@ class LateSnipeEngine:
 
         for key in resolved:
             del self._active_snipes[key]
-    
+        if resolved:
+            self._persist_snipes()
+
     def get_stats(self) -> dict:
         """Get snipe stats for health reporting."""
         return {
