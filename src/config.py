@@ -114,7 +114,11 @@ class SnipeConfig:
     entry_times: tuple = (15, 10, 6)
     taker_seconds_remaining: int = 6
     min_shares: float = 5.0
-    min_dollar_move: float = 50.0      # asset must be $50+ from round open price
+    min_dollar_move: float = 50.0      # default fallback (overridden by per-asset below)
+    dollar_move_btc: float = 150.0     # BTC: $150 = ~0.21% move
+    dollar_move_eth: float = 50.0      # ETH: $50 = ~1.4% move (working well)
+    dollar_move_sol: float = 0.0       # SOL: disabled (unreliable, bad $50 filter)
+    disabled_assets: list = field(default_factory=lambda: ["SOL"])  # SOL disabled
     max_concurrent: int = 2
     min_seconds_remaining: int = 3
 

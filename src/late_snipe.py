@@ -114,8 +114,17 @@ class LateSnipeEngine:
             logger.debug("Snipe skip %s: no token IDs", key)
             return None
 
-        # $50 dollar move filter — requires accurate round start price from Binance klines
-        min_dollar = getattr(self.snipe_config, 'min_dollar_move', 0)
+        # Per-asset dollar move filter
+        asset_upper = window.asset.upper()
+        disabled_assets = getattr(self.snipe_config, 'disabled_assets', [])
+        if asset_upper in [a.upper() for a in disabled_assets]:
+            logger.debug("Snipe skip %s: asset disabled", key)
+            return None
+
+        move_key = f"dollar_move_{asset_upper.lower()}"
+        min_dollar = getattr(self.snipe_config, move_key,
+                     getattr(self.snipe_config, 'min_dollar_move', 0))
+
         if min_dollar > 0:
             start_price = window.start_price
             if start_price <= 0:

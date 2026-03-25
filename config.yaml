@@ -70,7 +70,11 @@ arb:
 snipe:
   enabled: true
   min_buy_price: 0.79       # only snipe when token is 79c+
-  min_dollar_move: 50       # BTC/ETH/SOL must be $50+ from round start price
+  min_dollar_move: 50       # fallback default (overridden per asset below)
+  dollar_move_btc: 150      # BTC: $150 (~0.21%) — tighter filter
+  dollar_move_eth: 50       # ETH: $50 (~1.4%) — working well
+  dollar_move_sol: 0        # SOL: disabled (unreliable)
+  disabled_assets: ["SOL"]  # SOL disabled entirely
   max_buy_price: 0.99
   maker_bid_offset: 0.01    # bid 1c below ask (limit/maker order)
   min_edge: 0.01
