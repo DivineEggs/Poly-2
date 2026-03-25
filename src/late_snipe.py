@@ -92,6 +92,7 @@ class LateSnipeEngine:
         # State
         self._sniped_windows: dict[str, float] = {}  # window_key → last_snipe_time
         self._active_snipes: dict[str, dict] = {}     # window_key → snipe info
+        self._bot_start_time = time.time()            # track startup for mid-window safety
         
         # Stats
         self.stats = {
@@ -287,10 +288,16 @@ class LateSnipeEngine:
 
             existing = self._active_snipes.get(window.key)
 
+            # If bot just started and this window was already in progress,
+            # limit to 1 entry to avoid stacking on top of unknown prior orders
+            bot_age = now - self._bot_start_time
+            window_already_active = (window.end_ts - now) < (300 - snipe_window - 5)
+            effective_max = 1 if (bot_age < 60 and window_already_active) else max_entries
+
             if existing:
                 # Already entered — check cooldown and max entries
                 entries_placed = existing.get("entries_placed", 0)
-                if entries_placed >= max_entries:
+                if entries_placed >= effective_max:
                     continue  # Hit max entries for this window
                 last_entry_time = existing.get("last_entry_time", 0)
                 if now - last_entry_time < cooldown:
