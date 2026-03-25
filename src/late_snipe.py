@@ -522,12 +522,15 @@ class LateSnipeEngine:
     def _cancel_stale_makers(self):
         """
         Cancel open maker orders if the token price has dropped below min_buy_price.
+        Only fires while the round is still live (>5s remaining).
         Prevents filling at a bad price if the market reversed after order placement.
         """
         now = time.time()
         for window_key, snipe in list(self._active_snipes.items()):
-            if snipe.get("window_end", 0) < now:
-                continue  # Window expired, let _resolve_expired handle it
+            window_end = snipe.get("window_end", 0)
+            # Only cancel while round is still live with >5s remaining
+            if window_end < now or (window_end - now) < 5:
+                continue
             orders = snipe.get("orders", [])
             token_id = snipe.get("token_id", "")
             asset = snipe.get("asset", "")
@@ -538,6 +541,9 @@ class LateSnipeEngine:
                 if not book:
                     continue
                 current_ask = book.asks.best_price
+                # Skip if ask is 0 or near 0 (round already resolved)
+                if current_ask < 0.05:
+                    continue
                 asset_upper = asset.upper()
                 price_key = f"min_buy_price_{asset_upper.lower()}"
                 min_price = getattr(self.snipe_config, price_key,
