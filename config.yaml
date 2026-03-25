@@ -39,7 +39,6 @@ trading:
   allowed_assets:
   - BTC
   - ETH
-  - SOL
   allowed_timeframes:
   - 5m
   cancel_time_remaining: 15

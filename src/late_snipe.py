@@ -138,11 +138,11 @@ class LateSnipeEngine:
             # ETH after hours: use higher min price (88c)
             # (handled below when setting min_price)
 
-        # Balance check — skip if insufficient USDC
+        # Balance check — skip if insufficient USDC (ignore negative = API error)
         try:
             balance = self.clob.get_usdc_balance()
             min_balance = getattr(self.config.trading, 'min_usdc_balance', 3.0)
-            if balance < min_balance:
+            if 0 <= balance < min_balance:
                 logger.warning("Snipe skip %s: low balance $%.2f", key, balance)
                 return None
         except Exception:
