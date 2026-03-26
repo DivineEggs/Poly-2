@@ -119,14 +119,37 @@ class TradesLogger:
     def _check_outcome(self, order_id: str, trade: dict):
         """
         Check if order filled and whether it won or lost.
-        Returns (outcome, payout) where outcome is WIN/LOSS/UNFILLED.
+        Returns (outcome, payout) where outcome is WIN/LOSS/UNFILLED/UNKNOWN.
+
+        Order: check fill status FIRST. Only mark WIN/LOSS if order actually filled.
+        Unfilled orders = pnl $0 (no USDC moved).
         """
         import requests
 
         token_id = trade.get("token_id", "")
         shares = trade.get("shares", 0)
 
-        # Check token price after resolution (winner = ~$1, loser = ~$0)
+        # Step 1: Check if order actually filled
+        filled_shares = 0.0
+        try:
+            order = self.clob.get_order(order_id)
+            if order:
+                filled_shares = float(order.get("size_matched", 0))
+                status = order.get("status", "").upper()
+                # Cancelled or expired with no fill = UNFILLED
+                if status in ("CANCELLED", "CANCELED", "EXPIRED") and filled_shares < shares * 0.1:
+                    return "UNFILLED", 0.0
+                # Open order with no fill yet — too early, skip
+                if status == "LIVE" and filled_shares < shares * 0.1:
+                    return "UNKNOWN", 0.0
+        except Exception:
+            pass
+
+        # If filled less than 10% of shares, treat as unfilled
+        if filled_shares > 0 and filled_shares < shares * 0.1:
+            return "UNFILLED", 0.0
+
+        # Step 2: Check token price to determine WIN/LOSS
         try:
             r = requests.get(
                 f"https://clob.polymarket.com/price?token_id={token_id}&side=BUY",
@@ -136,20 +159,12 @@ class TradesLogger:
                 price_data = r.json()
                 price = float(price_data.get("price", 0))
                 if price >= 0.95:
-                    payout = round(shares * 1.0, 4)
+                    # Use actual filled shares for payout if available
+                    actual_shares = filled_shares if filled_shares >= shares * 0.1 else shares
+                    payout = round(actual_shares * 1.0, 4)
                     return "WIN", payout
                 elif price <= 0.05:
                     return "LOSS", 0.0
-        except Exception:
-            pass
-
-        # Fallback: check order status via CLOB
-        try:
-            order = self.clob.get_order(order_id)
-            if order:
-                size_matched = float(order.get("size_matched", 0))
-                if size_matched < shares * 0.1:
-                    return "UNFILLED", 0.0
         except Exception:
             pass
 
@@ -158,8 +173,12 @@ class TradesLogger:
     def _write_result(self, trade: dict, outcome: str, payout: float):
         """Append resolved trade to CSV."""
         cost = trade.get("cost", 0)
-        pnl = round(payout - cost, 4)
-        emoji = "✅" if outcome == "WIN" else "❌" if outcome == "LOSS" else "?"
+        # UNFILLED = order never executed, no USDC moved, pnl = $0
+        if outcome == "UNFILLED":
+            pnl = 0.0
+        else:
+            pnl = round(payout - cost, 4)
+        emoji = "✅" if outcome == "WIN" else "❌" if outcome == "LOSS" else ("🔄" if outcome == "UNFILLED" else "?")
 
         row = {
             "date":         trade.get("date", ""),
