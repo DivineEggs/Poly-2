@@ -78,7 +78,7 @@ snipe:
   dollar_move_sol: 0        # SOL: disabled entirely
   disabled_assets: ["SOL"]  # SOL disabled entirely
   trading_start_hour_et: 6    # Start at 6:00 AM ET
-  trading_end_hour_et: 20     # Stop at 8:30 PM ET
+  trading_end_hour_et: 19     # Stop at 7:30 PM ET (volatile evening excluded)
   trading_end_minute_et: 30
   max_buy_price: 0.99
   maker_bid_offset: 0.01    # bid 1c below ask (limit/maker order)
@@ -86,7 +86,7 @@ snipe:
   entry_times: [17, 11, 6]  # fire entries at these seconds remaining
   min_shares: 5             # polymarket minimum order size
   max_concurrent: 2
-  max_entries_per_window: 3   # max 3 entries per round
+  max_entries_per_window: 1   # 1 entry per window — protects bankroll at current size
   cooldown_seconds: 4.0       # min seconds between entries on same window
   snipe_window_seconds: 17    # start scanning 17s before round end
   taker_seconds_remaining: 6  # use taker at <=6s remaining

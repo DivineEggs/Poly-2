@@ -344,6 +344,32 @@ class LateSnipeEngine:
             else:
                 order_price = round(max(ask_price - self.snipe_config.maker_bid_offset, 0.01), 2)
 
+            # Final price guard: re-fetch ask to catch market moves since _check_conditions
+            # A BUY limit fills at ask price even if ask dropped below your limit
+            try:
+                fresh_book = fetch_order_book(token_id)
+                if fresh_book and fresh_book.asks.best_price > 0:
+                    fresh_ask = fresh_book.asks.best_price
+                    price_key = f"min_buy_price_{window.asset.upper().lower()}"
+                    # Use same min price logic as _check_conditions
+                    _in_golden = getattr(self, '_in_golden_hours', True)
+                    _min = getattr(self.snipe_config, price_key,
+                                   getattr(self.snipe_config, 'min_buy_price', 0.79))
+                    if not _in_golden and window.asset.upper() == "ETH":
+                        _min = max(_min, getattr(self.snipe_config, 'min_buy_price_eth_afterhours', 0.88))
+                    if fresh_ask < _min:
+                        logger.info("⚠️  Price guard: %s %s ask dropped %.0f¢ < min %.0f¢, skipping",
+                                    window.asset, buy_side, fresh_ask * 100, _min * 100)
+                        continue
+                    # Use fresh price for order
+                    if is_taker:
+                        order_price = fresh_ask
+                    else:
+                        order_price = round(max(fresh_ask - self.snipe_config.maker_bid_offset, 0.01), 2)
+                    ask_price = fresh_ask
+            except Exception as e:
+                logger.debug("Price guard fetch failed: %s", e)
+
             cost = order_price * tokens
             order_type = "TAKER" if is_taker else "MAKER"
 
