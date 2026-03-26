@@ -149,14 +149,18 @@ class LateSnipeEngine:
             logger.debug("Snipe skip %s: asset disabled", key)
             return None
 
-        # Time of day: BTC only in golden hours; ETH allowed after hours with higher min
-        in_golden = getattr(self, '_in_golden_hours', True)
+        # Time of day filter
+        in_golden   = getattr(self, '_in_golden_hours', True)
+        in_overnight = getattr(self, '_in_overnight_hours', False)
+
         if not in_golden:
             if asset_upper == "BTC":
                 logger.debug("Snipe skip %s: BTC outside golden hours", key)
                 return None
-            # ETH after hours: use higher min price (88c)
-            # (handled below when setting min_price)
+            if asset_upper == "ETH" and not in_overnight:
+                logger.debug("Snipe skip %s: ETH outside golden/overnight hours", key)
+                return None
+            # ETH in overnight window: use after-hours min (88c)
 
         # Balance check — skip if insufficient USDC (ignore negative = API error)
         try:
@@ -272,8 +276,13 @@ class LateSnipeEngine:
             et_minutes = et_now.hour * 60 + et_now.minute
             in_golden = et_minutes >= start_h * 60 and et_minutes < end_h * 60 + end_m
             self._in_golden_hours = in_golden  # used in _check_conditions
+            # ETH overnight window: 2AM-5AM ET (100% win rate, after-hours min applies)
+            eth_ov_start = getattr(self.snipe_config, 'eth_overnight_start_et', 2)
+            eth_ov_end   = getattr(self.snipe_config, 'eth_overnight_end_et', 5)
+            in_overnight = et_now.hour >= eth_ov_start and et_now.hour < eth_ov_end
+            self._in_overnight_hours = in_overnight
             # BTC blocked outside golden hours entirely
-            # ETH allowed 24/7 (handled per-window in _check_conditions)
+            # ETH allowed in golden hours + overnight window only
         except Exception:
             self._in_golden_hours = True  # safe default
 

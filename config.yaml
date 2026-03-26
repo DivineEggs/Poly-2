@@ -80,6 +80,8 @@ snipe:
   trading_start_hour_et: 6    # Start at 6:00 AM ET
   trading_end_hour_et: 19     # Stop at 7:30 PM ET (volatile evening excluded)
   trading_end_minute_et: 30
+  eth_overnight_start_et: 2   # ETH overnight window: 2AM ET
+  eth_overnight_end_et: 5     # ETH overnight window: ends 5AM ET (100% win rate)
   max_buy_price: 0.99
   maker_bid_offset: 0.01    # bid 1c below ask (limit/maker order)
   min_edge: 0.01
