@@ -71,6 +71,7 @@ class SnipeConfig:
     dollar_move_eth: float = 0.0
     dollar_move_sol: float = 0.0
     # Asset controls
+    eth_24h: bool = True               # ETH runs 24/7 (90c min + move filter handles selectivity)
     disabled_assets: list = field(default_factory=lambda: ["SOL"])
     trading_start_hour_et: int = 6
     trading_end_hour_et: int = 20
@@ -156,14 +157,15 @@ class LateSnipeEngine:
         in_golden   = getattr(self, '_in_golden_hours', True)
         in_overnight = getattr(self, '_in_overnight_hours', False)
 
+        eth_24h = getattr(self.snipe_config, 'eth_24h', False)
         if not in_golden:
             if asset_upper == "BTC":
                 logger.debug("Snipe skip %s: BTC outside golden hours", key)
                 return None
-            if asset_upper == "ETH" and not in_overnight:
+            if asset_upper == "ETH" and not eth_24h and not in_overnight:
                 logger.debug("Snipe skip %s: ETH outside golden/overnight hours", key)
                 return None
-            # ETH in overnight window: use after-hours min (88c)
+            # ETH 24/7 or overnight: 90c min applies uniformly
 
         # Balance check — skip if insufficient USDC (ignore negative = API error)
         try:
