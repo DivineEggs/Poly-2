@@ -57,14 +57,14 @@ class SnipeConfig:
     snipe_window_seconds: int = 17
     cooldown_seconds: float = 4.0
     max_entries_per_window: int = 2       # HARD LIMIT: 2 entries per window maximum
-    max_concurrent: int = 3
+    max_concurrent: int = 2               # HARD: 2 concurrent windows max
     min_seconds_remaining: int = 3
     # Per-asset min buy prices
     min_buy_price_btc: float = 0.90
     min_buy_price_eth: float = 0.90
     min_buy_price_eth_afterhours: float = 0.90
     # ETH move filter: only snipe if ETH moved >= this % from round open (0 = disabled)
-    eth_pct_move_from_open: float = 0.03
+    eth_pct_move_from_open: float = 0.10  # 0.1% (~$2 at $2061)
     # Per-asset move filters (0 = disabled; price floor handles filtering)
     min_dollar_move: float = 0.0
     dollar_move_btc: float = 0.0
