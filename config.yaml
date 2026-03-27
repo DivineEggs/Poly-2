@@ -89,7 +89,7 @@ snipe:
   maker_bid_offset: 0.01
   min_edge: 0.01
   entry_times: [17, 11, 6]
-  min_shares: 5                        # 5 shares per entry
+  min_shares: 1                        # 1 share per entry (survival mode)
   max_concurrent: 2                    # 2 concurrent windows (safe at current balance)
   max_entries_per_window: 2            # HARD CAP: 2 snipes per window only
   cooldown_seconds: 4.0

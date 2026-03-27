@@ -51,7 +51,7 @@ class SnipeConfig:
     maker_bid_offset: float = 0.01
     min_edge: float = 0.01
     entry_times: tuple = (15, 10, 6)      # legacy — unused
-    min_shares: float = 5.0
+    min_shares: float = 1.0
     order_size_dollars: float = 0.0      # 0 = use min_shares (5 shares); >0 = dollar-based
     taker_seconds_remaining: int = 6
     snipe_window_seconds: int = 17
@@ -373,7 +373,7 @@ class LateSnipeEngine:
             if _order_usd > 0:
                 tokens = max(_order_usd / ask_price, self.snipe_config.min_shares)
             else:
-                tokens = max(self.snipe_config.min_shares, 5.0)
+                tokens = self.snipe_config.min_shares
             entry_num = (existing.get("entries_placed", 0) if existing else 0) + 1
             is_taker = time_remaining <= taker_thresh
 
