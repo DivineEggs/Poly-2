@@ -82,7 +82,8 @@ snipe:
   trading_start_hour_et: 6
   trading_end_hour_et: 19
   trading_end_minute_et: 30
-  eth_24h: true                        # ETH runs 24/7 — 90c min + move filter handles selectivity
+  eth_24h: true                        # ETH runs 24/7
+  btc_24h: true                        # BTC runs 24/7 — 90c min + $50 move filter handles selectivity
   eth_overnight_start_et: 2            # kept for reference (unused when eth_24h: true)
   eth_overnight_end_et: 5
   maker_bid_offset: 0.01
