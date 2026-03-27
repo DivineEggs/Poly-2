@@ -46,8 +46,8 @@ logger = get_logger("late_snipe")
 class SnipeConfig:
     """Late snipe configuration."""
     enabled: bool = True
-    min_buy_price: float = 0.79           # global fallback min price
-    max_buy_price: float = 0.99
+    min_buy_price: float = 0.90           # global fallback min price
+    max_buy_price: float = 0.97
     maker_bid_offset: float = 0.01
     min_edge: float = 0.01
     entry_times: tuple = (15, 10, 6)      # legacy — unused
