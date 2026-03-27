@@ -64,7 +64,7 @@ class SnipeConfig:
     min_buy_price_eth: float = 0.90
     min_buy_price_eth_afterhours: float = 0.90
     # ETH move filter: only snipe if ETH moved >= this % from round open (0 = disabled)
-    eth_pct_move_from_open: float = 0.0   # no move filter — 90c min is the signal
+    eth_pct_move_from_open: float = 0.05  # 0.05% (~$1 at $2061)
     # Per-asset move filters (0 = disabled; price floor handles filtering)
     min_dollar_move: float = 0.0
     dollar_move_btc: float = 0.0

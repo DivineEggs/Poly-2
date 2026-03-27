@@ -74,10 +74,10 @@ snipe:
   max_buy_price: 0.97                  # cap at 97c (98-99c = bad risk/reward)
   order_size_dollars: 0                # 0 = use min_shares (5 shares per entry)
   min_dollar_move: 0
-  dollar_move_btc: 0                   # BTC: no move filter — 90c min is the signal
+  dollar_move_btc: 20                  # BTC: require $20 move from round open
   dollar_move_eth: 0
   dollar_move_sol: 0
-  eth_pct_move_from_open: 0.0          # ETH: no move filter — 90c min is the signal
+  eth_pct_move_from_open: 0.05         # ETH: require 0.05% move from round open (~$1)
   disabled_assets: ["SOL"]
   trading_start_hour_et: 6
   trading_end_hour_et: 19
