@@ -52,7 +52,7 @@ class SnipeConfig:
     min_edge: float = 0.01
     entry_times: tuple = (15, 10, 6)      # legacy — unused
     min_shares: float = 5.0
-    order_size_dollars: float = 7.50     # target order size in USD (0 = use min_shares)
+    order_size_dollars: float = 0.0      # 0 = use min_shares (5 shares); >0 = dollar-based
     taker_seconds_remaining: int = 6
     snipe_window_seconds: int = 17
     cooldown_seconds: float = 4.0
