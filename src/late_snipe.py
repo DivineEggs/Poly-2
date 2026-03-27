@@ -52,16 +52,19 @@ class SnipeConfig:
     min_edge: float = 0.01
     entry_times: tuple = (15, 10, 6)      # legacy — unused
     min_shares: float = 5.0
+    order_size_dollars: float = 7.50     # target order size in USD (0 = use min_shares)
     taker_seconds_remaining: int = 6
     snipe_window_seconds: int = 17
     cooldown_seconds: float = 4.0
-    max_entries_per_window: int = 3
-    max_concurrent: int = 2
+    max_entries_per_window: int = 2       # HARD LIMIT: 2 entries per window maximum
+    max_concurrent: int = 3
     min_seconds_remaining: int = 3
     # Per-asset min buy prices
-    min_buy_price_btc: float = 0.85       # BTC: 85c minimum
-    min_buy_price_eth: float = 0.79       # ETH: 79c during golden hours
-    min_buy_price_eth_afterhours: float = 0.88  # ETH: 88c after hours
+    min_buy_price_btc: float = 0.90
+    min_buy_price_eth: float = 0.90
+    min_buy_price_eth_afterhours: float = 0.90
+    # ETH move filter: only snipe if ETH moved >= this % from round open (0 = disabled)
+    eth_pct_move_from_open: float = 0.03
     # Per-asset move filters (0 = disabled; price floor handles filtering)
     min_dollar_move: float = 0.0
     dollar_move_btc: float = 0.0
@@ -189,6 +192,24 @@ class LateSnipeEngine:
             if dollar_move < min_dollar:
                 logger.debug("Snipe skip %s: $%.0f move < $%.0f min", key, dollar_move, min_dollar)
                 return None
+
+        # ETH 0.03% move-from-open filter — only snipe if price confirmed moving
+        eth_pct_filter = getattr(self.snipe_config, 'eth_pct_move_from_open', 0.0)
+        if asset_upper == "ETH" and eth_pct_filter > 0:
+            start_price = window.start_price
+            if start_price <= 0:
+                logger.debug("Snipe skip %s: ETH start_price not available", key)
+                return None
+            current_price = self.price_feed.get_price(window.asset)
+            if current_price <= 0:
+                logger.debug("Snipe skip %s: ETH no Binance price", key)
+                return None
+            pct_from_open = abs(current_price - start_price) / start_price * 100
+            if pct_from_open < eth_pct_filter:
+                logger.debug("Snipe skip ETH %s: only %.4f%% from open (need %.4f%%)",
+                             key, pct_from_open, eth_pct_filter)
+                return None
+            logger.debug("ETH move filter pass %s: %.4f%% from open", key, pct_from_open)
 
         # Check both sides — buy whichever is at min_buy_price or higher
         candidates = [
@@ -343,7 +364,12 @@ class LateSnipeEngine:
                             window.key, existing["side"], buy_side)
                 continue
 
-            tokens = max(self.snipe_config.min_shares, 5.0)
+            # Dollar-based sizing: target $7.50/entry; floor at min_shares (5)
+            _order_usd = getattr(self.snipe_config, 'order_size_dollars', 0.0)
+            if _order_usd > 0:
+                tokens = max(_order_usd / ask_price, self.snipe_config.min_shares)
+            else:
+                tokens = max(self.snipe_config.min_shares, 5.0)
             entry_num = (existing.get("entries_placed", 0) if existing else 0) + 1
             is_taker = time_remaining <= taker_thresh
 

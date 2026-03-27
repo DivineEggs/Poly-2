@@ -43,12 +43,12 @@ trading:
   - 5m
   cancel_time_remaining: 15
   max_orders_per_window: 1
-  max_position: 10.0
-  max_single_exposure: 10.0
+  max_position: 20.0
+  max_single_exposure: 20.0
   min_spread_profit: 0.03
-  order_size: 5.0
-  # One trade at a time (low capital mode)
-  max_concurrent_pairs: 1
+  order_size: 7.50
+  # Max 3 concurrent pairs (Resolution Sniper V7)
+  max_concurrent_pairs: 3
   rechase_enabled: true
   stop_loss_enabled: true
 
@@ -68,28 +68,30 @@ arb:
 # Late snipe — incremental limit buys in final seconds
 snipe:
   enabled: true
-  min_buy_price: 0.79       # global fallback
-  min_buy_price_btc: 0.85              # BTC: 85c minimum
-  min_buy_price_eth: 0.79              # ETH: 79c during golden hours
-  min_buy_price_eth_afterhours: 0.88   # ETH: 88c after 8:30PM ET (after hours)
-  min_dollar_move: 0        # disabled — price floor handles filtering
-  dollar_move_btc: 0        # BTC: min price 85c is the filter
-  dollar_move_eth: 0        # ETH: min price 79c/88c is the filter
-  dollar_move_sol: 0        # SOL: disabled entirely
-  disabled_assets: ["SOL"]  # SOL disabled entirely
-  trading_start_hour_et: 6    # Start at 6:00 AM ET
-  trading_end_hour_et: 19     # Stop at 7:30 PM ET (volatile evening excluded)
+  min_buy_price: 0.90                  # global fallback (Resolution Sniper V7)
+  min_buy_price_btc: 0.90              # BTC: 90c minimum
+  min_buy_price_eth: 0.90              # ETH: 90c minimum
+  min_buy_price_eth_afterhours: 0.90   # ETH: 90c after hours (same threshold)
+  max_buy_price: 0.97                  # cap at 97c
+  order_size_dollars: 7.50             # $7.50 per entry
+  min_dollar_move: 0
+  dollar_move_btc: 0
+  dollar_move_eth: 0
+  dollar_move_sol: 0
+  eth_pct_move_from_open: 0.03         # ETH only: require 0.03% move from round open
+  disabled_assets: ["SOL"]
+  trading_start_hour_et: 6
+  trading_end_hour_et: 19
   trading_end_minute_et: 30
-  eth_overnight_start_et: 2   # ETH overnight window: 2AM ET
-  eth_overnight_end_et: 5     # ETH overnight window: ends 5AM ET (100% win rate)
-  max_buy_price: 0.99
-  maker_bid_offset: 0.01    # bid 1c below ask (limit/maker order)
+  eth_overnight_start_et: 2
+  eth_overnight_end_et: 5
+  maker_bid_offset: 0.01
   min_edge: 0.01
-  entry_times: [17, 11, 6]  # fire entries at these seconds remaining
-  min_shares: 5             # polymarket minimum order size
-  max_concurrent: 2
-  max_entries_per_window: 2   # 2 entries per window — Kelly-optimal at current bankroll
-  cooldown_seconds: 4.0       # min seconds between entries on same window
-  snipe_window_seconds: 17    # start scanning 17s before round end
-  taker_seconds_remaining: 6  # use taker at <=6s remaining
+  entry_times: [17, 11, 6]
+  min_shares: 5                        # polymarket minimum
+  max_concurrent: 3                    # max open positions
+  max_entries_per_window: 2            # HARD CAP: 2 snipes per window only
+  cooldown_seconds: 4.0
+  snipe_window_seconds: 17
+  taker_seconds_remaining: 6
   min_seconds_remaining: 3
